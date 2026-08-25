@@ -99,7 +99,7 @@ def main_loop():
         console.print(Rule(style="orange4"))
         console.print()
 
-        if user_input.lower() == "/exit" or "/bye":
+        if user_input.lower() == "/exit" or user_input.lower() == "/bye":
             console.print(Rule(style="orange3"))
             console.print(Markdown(" **Exiting Agent Glace...** "))
             console.print(Rule(style="orange3"))
