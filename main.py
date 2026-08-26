@@ -113,7 +113,7 @@ def main_loop():
             console.print(Markdown(" **Exiting Agent Glace...** "))
             console.print(Rule(style="orange3"))
 
-            subprocess.run(["ollama", "stop", "oamazonasgabriel/lfm2.5-2.6b:q4_k_m-8gbGPU"])
+            subprocess.run(["ollama", "stop", model_name])
 
             break
 
