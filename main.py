@@ -58,39 +58,48 @@ console.print()
 console.print(Rule(style="orange3"))
 
 def main_loop():
+    model_name = ""
 
-    def check_model_choice():
-        try:
-            with open (model_config_fl, "r") as f:
-                model_name = f.read()
+    messages = [
+        {
+            'role': 'system',
+            'content': ''''''
+        }
+    ]
 
-                console.print(Markdown(f"Model Selected: **{model_name}**"))
-                console.print(Rule(style="orange3"))
+    try:
+        with open(model_config_fl, "r", encoding="utf-8") as f:
+            saved_model = f.read().strip()
 
-                messages = [
-                    {
-                        'role': 'system',
-                        'content': ''''''
-                    }
-                ]
-
-        except FileNotFoundError:
-            pass
-
-    '''
-    if check_model_choice() == "1":
-        model_name = "oamazonasgabriel/lfm2.5-2.6b:q4_k_m-8gbGPU"
-
-        console.print(Markdown(f"Model Selected: **LFM 2.5 (2.6B)**"))
+        model_name = saved_model
+        console.print(Markdown(f"Model Selected: **{saved_model}**"))
         console.print(Rule(style="orange3"))
 
-        messages = [
-            {
-                'role': 'system',
-                'content': ''''''
-            }
-        ]
-    '''
+    except FileNotFoundError:
+        ollama_list_models()
+        model_list = client.list().get("models", [])
+        available_models = [model.get("model") for model in model_list if model.get("model")]
+
+        if not available_models:
+            console.print(Markdown("**No installed Ollama models were found. Please install a model first.**"))
+            console.print(Rule(style="orange3"))
+            return
+
+        while model_name not in available_models:
+            def_model_input = console.input("\nEnter model name: ").strip()
+
+            if def_model_input in available_models:
+                os.makedirs(os.path.dirname(model_config_fl), exist_ok=True)
+                with open(model_config_fl, "w", encoding="utf-8") as f:
+                    f.write(def_model_input)
+
+                model_name = def_model_input
+                console.print(Markdown(f"Model Selected: **{def_model_input}**"))
+                console.print(Rule(style="orange3"))
+                break
+
+            console.print(Markdown("**Model not found. Please enter one of the installed models shown above.**"))
+            console.print(Rule(style="orange3"))
 
     while True:
         console.print()
