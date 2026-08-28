@@ -142,8 +142,7 @@ List Options:
         stream =client.chat(
             model=model_name,
             messages=messages,
-            stream=True,
-            think=True
+            stream=True
         )
 
         def render_stream(response_stream):
