@@ -20,7 +20,11 @@ client = ollama.Client(host='http://127.0.0.1:11434')
 script_dir = os.path.dirname(os.path.abspath(__file__))
 
 model_config_fl = os.path.join(script_dir, "config", "model_choice")
-transcript_fl = os.path.join(script_dir, "storage", "transcripts", "transcript.md")
+
+transcripts_dir = os.path.join(script_dir, "storage", "transcripts")
+os.makedirs(transcripts_dir, exist_ok=True)
+session_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+session_transcript_fl = os.path.join(transcripts_dir, f"Transcript_{session_time}.md")
 
 ## FUNCTIONS
 
@@ -63,7 +67,7 @@ def main_loop():
     messages = [
         {
             'role': 'system',
-            'content': ''''''
+            'content': '''You are Agent Glace.'''
         }
     ]
 
@@ -142,14 +146,15 @@ List Options:
         stream =client.chat(
             model=model_name,
             messages=messages,
-            stream=True
+            stream=True,
+            think=False
         )
 
         def render_stream(response_stream):
             thinking_txt = ""
             response_txt = ""
 
-            with Live(console=console, refresh_per_second=10, transient=False) as live:
+            with Live(console=console, refresh_per_second=30, transient=False) as live:
                 for chunk in response_stream:
                     message = chunk.get('message', {})
 
@@ -179,8 +184,8 @@ List Options:
             timestamp_now = datetime.now()
             timestamp_now_formatted = timestamp_now.strftime("%H:%M:%S, %B %d, %Y")
 
-            with open(transcript_fl, "a", encoding="utf-8", errors="replace") as f:
-                f.write(timestamp_now_formatted)
+            with open(session_transcript_fl, "a", encoding="utf-8", errors="replace") as f:
+                #f.write(timestamp_now_formatted)
 
                 f.write("\n\n**USER:** \n")
                 f.write(user_input)
@@ -190,7 +195,15 @@ List Options:
                 f.write(response_txt)
                 f.write("\n\n")
 
-        render_stream(stream)
+            return response_txt
+
+        response_txt = render_stream(stream)
+        messages.append(
+            {
+                'role': 'assistant',
+                'content': response_txt
+            }
+        )
 
 if __name__ == "__main__":
     main_loop()
