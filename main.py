@@ -31,7 +31,9 @@ session_transcript_fl = os.path.join(transcripts_dir, f"Transcript_{session_time
 def ollama_list_models():
     model_list_raw = client.list()
 
-    print("\nAvailable Models:\n")
+    print()
+    console.print(Markdown("### **Available Models:**"))
+    print()
 
     for model in model_list_raw.get('models', []):
         print(model.get('model'))
@@ -39,7 +41,9 @@ def ollama_list_models():
 def ollama_list_running():
     ps_list_raw = client.ps()
 
-    print("\nRunning Models:\n")
+    print()
+    console.print(Markdown("### **Running Models:**"))
+    print()
 
     for model in ps_list_raw.get('models', []):
         print(model.get('name'))
@@ -136,6 +140,9 @@ List Options:
 
             continue
 
+        elif user_input.lower() == "/model":
+            pass
+
         messages.append(
             {
                 'role': 'user',
@@ -182,7 +189,7 @@ List Options:
             console.print()
 
             timestamp_now = datetime.now()
-            timestamp_now_formatted = timestamp_now.strftime("%H:%M:%S, %B %d, %Y")
+            timestamp_now_formatted = timestamp_now.strftime("%H:%M")
 
             with open(session_transcript_fl, "a", encoding="utf-8", errors="replace") as f:
                 #f.write(timestamp_now_formatted)
