@@ -60,6 +60,7 @@ console.print(Rule(style="orange3"))
 
 #console.print() - Spaced out automatically by below MD text
 console.print(Markdown('''
+- Use `/help` to view available commands.
 - Use `/exit` or `/bye` to exit the agent.
 '''))
 console.print()
@@ -124,6 +125,15 @@ def main_loop():
             subprocess.run(["ollama", "stop", model_name])
 
             break
+
+        elif user_input.lower() == "/help":
+            console.print(Markdown('''
+**Available Commands:**
+ - `/exit` or `/bye` - To exit the agent.
+ - `/list` - To list available/running models.
+ - `/model` - To change model.
+'''))
+            continue
 
         elif user_input.lower() == "/list":
             console.print('''
