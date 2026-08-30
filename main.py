@@ -10,11 +10,27 @@ from rich.live import Live
 from rich.text import Text
 
 import os
+import sys
 import subprocess
 
 from datetime import datetime
+import requests
 
 ## MISC
+
+def ollama_active_check(url="http://127.0.0.1:11434"):
+    try:
+        response = requests.get(url, timeout=2)
+        return response.status_code == 200
+
+    except requests.exceptions.ConnectionError:
+        return False
+
+if ollama_active_check():
+    pass
+else:
+    print("\nOllama is not running.\n")
+    sys.exit()
 
 client = ollama.Client(host='http://127.0.0.1:11434')
 script_dir = os.path.dirname(os.path.abspath(__file__))
