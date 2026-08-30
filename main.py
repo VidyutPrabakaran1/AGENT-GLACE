@@ -244,11 +244,11 @@ List Options:
             with open(session_transcript_fl, "a", encoding="utf-8", errors="replace") as f:
                 #f.write(timestamp_now_formatted)
 
-                f.write("\n\n**USER:** \n")
+                f.write("\n\nUSER: \n")
                 f.write(user_input)
                 f.write("\n\n")
 
-                f.write("**GLACE:** \n")
+                f.write("GLACE: \n")
                 f.write(response_txt)
                 f.write("\n\n")
 
