@@ -141,7 +141,31 @@ List Options:
             continue
 
         elif user_input.lower() == "/model":
-            pass
+            ollama_list_models()
+            print()
+            model_name = ""
+            model_list = client.list().get("models", [])
+            available_models = [model. get("model") for model in model_list if model.get("model")]
+
+            while model_name not in available_models:
+                model_change_input = console.input("Enter model name: ").strip()
+
+                if model_change_input in available_models:
+                    #os.makedirs(os.path.dirname(model_config_fl))
+                    with open (model_config_fl, "w", encoding="utf-8") as f:
+                        f.write(model_change_input)
+
+                    model_name = model_change_input
+                    print()
+                    console.print(Rule(style="orange3"))
+                    console.print(Markdown(f"Model Selected: **{model_change_input}** "))
+                    console.print(Rule(style="orange3"))
+                    break
+
+                console.print(Markdown("**Model not found. Please enter one of the installed models shown above.**"))
+                console.print(Rule(style="orange3"))
+
+            continue
 
         messages.append(
             {
