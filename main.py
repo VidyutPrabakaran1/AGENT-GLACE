@@ -23,7 +23,7 @@ console = Console()
 
 def ollama_active_check(url="http://127.0.0.1:11434"):
     try:
-        response = requests.get(url, timeout=2)
+        response = requests.get(url, timeout=5)
         return response.status_code == 200
 
     except requests.exceptions.ConnectionError:
@@ -32,13 +32,14 @@ def ollama_active_check(url="http://127.0.0.1:11434"):
 if ollama_active_check():
     pass
 else:
-    print("\nOllama is not running.\n")
+    console.print(Panel("Ollama is not running. Please start Ollama to use Agent Glace."))
     sys.exit()
 
 client = ollama.Client(host='http://127.0.0.1:11434')
 script_dir = os.path.dirname(os.path.abspath(__file__))
 
 model_config_fl = os.path.join(script_dir, "config", "model_choice")
+context_window_fl = os.path.join(script_dir, "config", "context_window_size")
 
 transcripts_dir = os.path.join(script_dir, "storage", "transcripts")
 os.makedirs(transcripts_dir, exist_ok=True)
@@ -46,6 +47,31 @@ session_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 session_transcript_fl = os.path.join(transcripts_dir, f"Transcript_{session_time}.md")
 
 ## FUNCTIONS
+
+def get_char_budget_window(messages, max_chars):
+    if not messages:
+        return []
+
+    sys_message = [messages[0]] if messages[0].get("role") == "system" else []
+    sys_msg_char_count = len(sys_message[0]["content"]) if sys_message else 0
+
+    remaining_budget = max_chars - sys_msg_char_count
+    convo_hist = messages[1:] if sys_message else messages
+
+    selected_hist = []
+    current_chars = 0
+
+    for msg in reversed(convo_hist):
+        msg_len = len(msg["content"])
+
+        if current_chars + msg_len <= remaining_budget:
+            selected_hist.insert(0, msg)
+            current_chars += msg_len
+
+        else:
+            break
+
+    return sys_message + selected_hist
 
 def ollama_list_models():
     model_list_raw = client.list()
@@ -61,7 +87,7 @@ def ollama_list_running():
     ps_list_raw = client.ps()
 
     print()
-    console.print(Panel(Markdown("### **Running Models:**")))
+    console.print(Panel(Markdown("**Running Models:**")))
     print()
 
     for model in ps_list_raw.get('models', []):
@@ -95,8 +121,8 @@ def main_loop():
             saved_model = f.read().strip()
 
         model_name = saved_model
-        console.print(Panel(Markdown(f"Model Selected: **{saved_model}**")))
-        console.print(Rule(style="orange3"))
+        #console.print(Panel(Markdown(f"Model Selected: **{saved_model}**")))
+        #console.print(Rule(style="orange3"))
 
     except FileNotFoundError:
         ollama_list_models()
@@ -119,12 +145,34 @@ def main_loop():
                     f.write(def_model_input)
 
                 model_name = def_model_input
+                console.print(Rule(style="orange3"))
                 console.print(Panel(Markdown(f"Model Selected: **{def_model_input}**")))
                 console.print(Rule(style="orange3"))
                 break
 
             console.print(Panel(Markdown("**Model not found. Please enter one of the installed models shown above.**")))
             console.print(Rule(style="orange3"))
+
+    try:
+        with open(context_window_fl, "r", encoding="utf-8") as f:
+            context_size = f.read().strip()
+
+    except FileNotFoundError:
+        print()
+        console.print(Rule(style="orange3"))
+        ctxt_size_input = console.input("\nEnter context window size (e.g. 6144): ").strip()
+
+        os.makedirs(os.path.dirname(context_window_fl), exist_ok=True)
+        with open(context_window_fl, "w", encoding="utf-8") as f:
+            f.write(ctxt_size_input)
+
+        context_size = ctxt_size_input
+        console.print(Rule(style="orange3"))
+        console.print(Panel(Markdown(f"Context Window Size: **{ctxt_size_input}**")))
+        console.print(Rule(style="orange3"))
+
+    console.print(Panel(Markdown(f"Model Selected: **{model_name}** | Context Window Size: **{context_size}**")))
+    console.print(Rule(style="orange3"))
 
     while True:
         console.print()
@@ -143,20 +191,20 @@ def main_loop():
             break
 
         elif user_input.lower() == "/help":
-            console.print(Markdown('''
+            console.print(Panel(Markdown('''
 **Available Commands:**
  - `/exit` or `/bye` - To exit the agent.
  - `/list` - To list available/running models.
  - `/model` - To change model.
-'''))
+''')))
             continue
 
         elif user_input.lower() == "/list":
-            console.print('''
+            console.print(Panel('''
 List Options:
 [1] - List Available Models
 [2] - List Running Models
-            ''')
+            '''))
 
             list_input = console.input("\nEnter Option (e.g. 1): ")
             if list_input.lower() == "1":
@@ -184,11 +232,11 @@ List Options:
                     model_name = model_change_input
                     print()
                     console.print(Rule(style="orange3"))
-                    console.print(Markdown(f"Model Selected: **{model_change_input}** "))
+                    console.print(Panel(Markdown(f"Model Selected: **{model_change_input}** ")))
                     console.print(Rule(style="orange3"))
                     break
 
-                console.print(Markdown("**Model not found. Please enter one of the installed models shown above.**"))
+                console.print(Panel(Markdown("**Model not found. Please enter one of the installed models shown above.**")))
                 console.print(Rule(style="orange3"))
 
             continue
@@ -200,9 +248,11 @@ List Options:
             }
         )
 
+        context_payload = get_char_budget_window(messages, max_chars=int(context_size))
+
         stream =client.chat(
             model=model_name,
-            messages=messages,
+            messages=context_payload,
             stream=True,
             think=False
         )
