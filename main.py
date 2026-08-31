@@ -8,6 +8,7 @@ from rich.rule import Rule
 from rich.markdown import Markdown
 from rich.live import Live
 from rich.text import Text
+from rich.panel import Panel
 
 import os
 import sys
@@ -17,6 +18,8 @@ from datetime import datetime
 import requests
 
 ## MISC
+
+console = Console()
 
 def ollama_active_check(url="http://127.0.0.1:11434"):
     try:
@@ -48,7 +51,7 @@ def ollama_list_models():
     model_list_raw = client.list()
 
     print()
-    console.print(Markdown("### **Available Models:**"))
+    console.print(Panel(Markdown("**Available Models:**")))
     print()
 
     for model in model_list_raw.get('models', []):
@@ -58,7 +61,7 @@ def ollama_list_running():
     ps_list_raw = client.ps()
 
     print()
-    console.print(Markdown("### **Running Models:**"))
+    console.print(Panel(Markdown("### **Running Models:**")))
     print()
 
     for model in ps_list_raw.get('models', []):
@@ -66,20 +69,15 @@ def ollama_list_running():
 
 ## CODE
 
-console = Console()
+console.print(Rule(style="orange3"))
+console.print(Panel(Markdown(" WELCOME TO **AGENT GLACE!** "), title="AGENT GLACE", style="orange3"))
 
-console.print(Rule(style="orange3"))
-console.print(Rule(style="orange3"))
-console.print(Markdown(" WELCOME TO **AGENT GLACE!** "))
-console.print(Rule(style="orange3"))
-console.print(Rule(style="orange3"))
-
-#console.print() - Spaced out automatically by below MD text
-console.print(Markdown('''
+console.print(Panel(Markdown('''
+Quick Commands:
 - Use `/help` to view available commands.
 - Use `/exit` or `/bye` to exit the agent.
-'''))
-console.print()
+''')))
+
 console.print(Rule(style="orange3"))
 
 def main_loop():
@@ -97,7 +95,7 @@ def main_loop():
             saved_model = f.read().strip()
 
         model_name = saved_model
-        console.print(Markdown(f"Model Selected: **{saved_model}**"))
+        console.print(Panel(Markdown(f"Model Selected: **{saved_model}**")))
         console.print(Rule(style="orange3"))
 
     except FileNotFoundError:
@@ -106,11 +104,13 @@ def main_loop():
         available_models = [model.get("model") for model in model_list if model.get("model")]
 
         if not available_models:
-            console.print(Markdown("**No installed Ollama models were found. Please install a model first.**"))
+            console.print(Panel(Markdown("**No installed Ollama models were found. Please install a model first.**")))
             console.print(Rule(style="orange3"))
             return
 
         while model_name not in available_models:
+            print()
+            console.print(Rule(style="orange3"))
             def_model_input = console.input("\nEnter model name: ").strip()
 
             if def_model_input in available_models:
@@ -119,11 +119,11 @@ def main_loop():
                     f.write(def_model_input)
 
                 model_name = def_model_input
-                console.print(Markdown(f"Model Selected: **{def_model_input}**"))
+                console.print(Panel(Markdown(f"Model Selected: **{def_model_input}**")))
                 console.print(Rule(style="orange3"))
                 break
 
-            console.print(Markdown("**Model not found. Please enter one of the installed models shown above.**"))
+            console.print(Panel(Markdown("**Model not found. Please enter one of the installed models shown above.**")))
             console.print(Rule(style="orange3"))
 
     while True:
@@ -135,7 +135,7 @@ def main_loop():
 
         if user_input.lower() == "/exit" or user_input.lower() == "/bye":
             console.print(Rule(style="orange3"))
-            console.print(Markdown(" **Exiting Agent Glace...** "))
+            console.print(Panel(Markdown(" **Exiting Agent Glace...** ")))
             console.print(Rule(style="orange3"))
 
             subprocess.run(["ollama", "stop", model_name])
@@ -231,7 +231,7 @@ List Options:
 
                     if response_txt:
                         renderables.append(Markdown('### Response :'))
-                        renderables.append(Text(response_txt))
+                        renderables.append(Markdown(response_txt))
 
                     if renderables:
                         live.update(Group(*renderables))
