@@ -196,12 +196,16 @@ def main_loop():
                 break
 
             elif user_input.lower() == "/help":
-                console.print(Panel(Markdown('''
-    **Available Commands:**
-    - `/exit` or `/bye` - To exit the agent.
-    - `/list` - To list available/running models.
-    - `/model` - To change model.
-    ''')))
+                console.print(
+                    Panel(
+                        Markdown('''
+**Available Commands:**
+- `/exit` or `/bye` - To exit the agent.
+- `/list` - To list available/running models.
+- `/model` - To change model.
+''')
+                    )
+                )
                 continue
 
             elif user_input.lower() == "/list":
