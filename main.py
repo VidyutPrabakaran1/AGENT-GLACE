@@ -188,7 +188,7 @@ def main_loop():
 
             if user_input.lower() == "/exit" or user_input.lower() == "/bye":
                 console.print(Rule(style="orange3"))
-                console.print(Panel(Markdown(" **Exiting Agent Glace...** ")))
+                console.print(Panel(Markdown(" **Exiting Agent Glace...** ")), style="bold red")
                 console.print(Rule(style="orange3"))
 
                 subprocess.run(["ollama", "stop", model_name])
@@ -327,7 +327,7 @@ def main_loop():
 
         except KeyboardInterrupt:
             console.print(Rule(style="orange3"))
-            console.print(Panel(Markdown(" **Exiting Agent Glace...** ")))
+            console.print(Panel(Markdown(" **Exiting Agent Glace...** ")), style="bold red")
             console.print(Rule(style="orange3"))
 
             subprocess.run(["ollama", "stop", model_name])
