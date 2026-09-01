@@ -179,142 +179,156 @@ def main_loop():
     console.print(Rule(style="orange3"))
 
     while True:
-        console.print()
-        console.print(Rule(style="orange4"))
-        user_input = console.input("[bold green]>>> [/bold green]")
-        console.print(Rule(style="orange4"))
-        console.print()
+        try:
+            console.print()
+            console.print(Rule(style="orange4"))
+            user_input = console.input("[bold green]>>> [/bold green]")
+            console.print(Rule(style="orange4"))
+            console.print()
 
-        if user_input.lower() == "/exit" or user_input.lower() == "/bye":
+            if user_input.lower() == "/exit" or user_input.lower() == "/bye":
+                console.print(Rule(style="orange3"))
+                console.print(Panel(Markdown(" **Exiting Agent Glace...** ")))
+                console.print(Rule(style="orange3"))
+
+                subprocess.run(["ollama", "stop", model_name])
+
+                break
+
+            elif user_input.lower() == "/help":
+                console.print(Panel(Markdown('''
+    **Available Commands:**
+    - `/exit` or `/bye` - To exit the agent.
+    - `/list` - To list available/running models.
+    - `/model` - To change model.
+    ''')))
+                continue
+
+            elif user_input.lower() == "/list":
+                console.print(Panel('''
+    List Options:
+    [1] - List Available Models
+    [2] - List Running Models
+                '''))
+
+                list_input = console.input("\nEnter Option (e.g. 1): ")
+                if list_input.lower() == "1":
+                    ollama_list_models()
+                elif list_input.lower() == "2":
+                    ollama_list_running()
+
+                continue
+
+            elif user_input.lower() == "/model":
+                ollama_list_models()
+                print()
+                model_name = ""
+                model_list = client.list().get("models", [])
+                available_models = [model. get("model") for model in model_list if model.get("model")]
+
+                while model_name not in available_models:
+                    model_change_input = console.input("Enter model name: ").strip()
+
+                    if model_change_input in available_models:
+                        #os.makedirs(os.path.dirname(model_config_fl))
+                        with open (model_config_fl, "w", encoding="utf-8") as f:
+                            f.write(model_change_input)
+
+                        model_name = model_change_input
+                        print()
+                        console.print(Rule(style="orange3"))
+                        console.print(Panel(Markdown(f"Model Selected: **{model_change_input}** ")))
+                        console.print(Rule(style="orange3"))
+                        break
+
+                    console.print(Panel(Markdown("**Model not found. Please enter one of the installed models shown above.**")))
+                    console.print(Rule(style="orange3"))
+
+                continue
+
+            messages.append(
+                {
+                    'role': 'user',
+                    'content': user_input
+                }
+            )
+
+            context_payload = get_char_budget_window(messages, max_chars=int(context_size))
+
+            stream =client.chat(
+                model=model_name,
+                messages=context_payload,
+                stream=True,
+                think=False
+            )
+
+            def render_stream(response_stream):
+                thinking_txt = ""
+                response_txt = ""
+                try:
+                    with Live(console=console, refresh_per_second=30, transient=False) as live:
+                        for chunk in response_stream:
+                            message = chunk.get('message', {})
+
+                            thinking_delta = message.get('thinking', '')
+                            if thinking_delta:
+                                thinking_txt += thinking_delta
+
+                            content_delta = message.get('content', '')
+                            if content_delta:
+                                response_txt += content_delta
+
+                            renderables = []
+
+                            if thinking_txt:
+                                renderables.append(Markdown('### Thinking...'))
+                                renderables.append(Text(thinking_txt, style="grey66"))
+
+                            if response_txt:
+                                renderables.append(Markdown('### Response :'))
+                                renderables.append(Markdown(response_txt))
+
+                            if renderables:
+                                live.update(Group(*renderables))
+
+                except KeyboardInterrupt:
+                    print()
+                    console.print(Panel("RESPONE INTERRUPTED", style="bold red"))
+
+                console.print()
+
+                timestamp_now = datetime.now()
+                timestamp_now_formatted = timestamp_now.strftime("%H:%M")
+
+                with open(session_transcript_fl, "a", encoding="utf-8", errors="replace") as f:
+                    #f.write(timestamp_now_formatted)
+
+                    f.write("\n\nUSER: \n")
+                    f.write(user_input)
+                    f.write("\n\n")
+
+                    f.write("GLACE: \n")
+                    f.write(response_txt)
+                    f.write("\n\n")
+
+                return response_txt
+
+            response_txt = render_stream(stream)
+            messages.append(
+                {
+                    'role': 'assistant',
+                    'content': response_txt
+                }
+            )
+
+        except KeyboardInterrupt:
             console.print(Rule(style="orange3"))
             console.print(Panel(Markdown(" **Exiting Agent Glace...** ")))
             console.print(Rule(style="orange3"))
 
             subprocess.run(["ollama", "stop", model_name])
-
+                    
             break
-
-        elif user_input.lower() == "/help":
-            console.print(Panel(Markdown('''
-**Available Commands:**
- - `/exit` or `/bye` - To exit the agent.
- - `/list` - To list available/running models.
- - `/model` - To change model.
-''')))
-            continue
-
-        elif user_input.lower() == "/list":
-            console.print(Panel('''
-List Options:
-[1] - List Available Models
-[2] - List Running Models
-            '''))
-
-            list_input = console.input("\nEnter Option (e.g. 1): ")
-            if list_input.lower() == "1":
-                ollama_list_models()
-            elif list_input.lower() == "2":
-                ollama_list_running()
-
-            continue
-
-        elif user_input.lower() == "/model":
-            ollama_list_models()
-            print()
-            model_name = ""
-            model_list = client.list().get("models", [])
-            available_models = [model. get("model") for model in model_list if model.get("model")]
-
-            while model_name not in available_models:
-                model_change_input = console.input("Enter model name: ").strip()
-
-                if model_change_input in available_models:
-                    #os.makedirs(os.path.dirname(model_config_fl))
-                    with open (model_config_fl, "w", encoding="utf-8") as f:
-                        f.write(model_change_input)
-
-                    model_name = model_change_input
-                    print()
-                    console.print(Rule(style="orange3"))
-                    console.print(Panel(Markdown(f"Model Selected: **{model_change_input}** ")))
-                    console.print(Rule(style="orange3"))
-                    break
-
-                console.print(Panel(Markdown("**Model not found. Please enter one of the installed models shown above.**")))
-                console.print(Rule(style="orange3"))
-
-            continue
-
-        messages.append(
-            {
-                'role': 'user',
-                'content': user_input
-            }
-        )
-
-        context_payload = get_char_budget_window(messages, max_chars=int(context_size))
-
-        stream =client.chat(
-            model=model_name,
-            messages=context_payload,
-            stream=True,
-            think=False
-        )
-
-        def render_stream(response_stream):
-            thinking_txt = ""
-            response_txt = ""
-
-            with Live(console=console, refresh_per_second=30, transient=False) as live:
-                for chunk in response_stream:
-                    message = chunk.get('message', {})
-
-                    thinking_delta = message.get('thinking', '')
-                    if thinking_delta:
-                        thinking_txt += thinking_delta
-
-                    content_delta = message.get('content', '')
-                    if content_delta:
-                        response_txt += content_delta
-
-                    renderables = []
-
-                    if thinking_txt:
-                        renderables.append(Markdown('### Thinking...'))
-                        renderables.append(Text(thinking_txt, style="grey66"))
-
-                    if response_txt:
-                        renderables.append(Markdown('### Response :'))
-                        renderables.append(Markdown(response_txt))
-
-                    if renderables:
-                        live.update(Group(*renderables))
-
-            console.print()
-
-            timestamp_now = datetime.now()
-            timestamp_now_formatted = timestamp_now.strftime("%H:%M")
-
-            with open(session_transcript_fl, "a", encoding="utf-8", errors="replace") as f:
-                #f.write(timestamp_now_formatted)
-
-                f.write("\n\nUSER: \n")
-                f.write(user_input)
-                f.write("\n\n")
-
-                f.write("GLACE: \n")
-                f.write(response_txt)
-                f.write("\n\n")
-
-            return response_txt
-
-        response_txt = render_stream(stream)
-        messages.append(
-            {
-                'role': 'assistant',
-                'content': response_txt
-            }
-        )
 
 if __name__ == "__main__":
     main_loop()
