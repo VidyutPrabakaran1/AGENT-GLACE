@@ -45,6 +45,7 @@ transcripts_dir = os.path.join(script_dir, "storage", "transcripts")
 os.makedirs(transcripts_dir, exist_ok=True)
 session_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 session_transcript_fl = os.path.join(transcripts_dir, f"Transcript_{session_time}.md")
+sys_msg_fl = os.path.join(script_dir, "storage", "SYSTEM.md")
 
 ## FUNCTIONS
 
@@ -109,10 +110,13 @@ console.print(Rule(style="orange3"))
 def main_loop():
     model_name = ""
 
+    with open(sys_msg_fl, "r") as f:
+        system_msg = f.read()
+
     messages = [
         {
             'role': 'system',
-            'content': '''You are Agent Glace.'''
+            'content': system_msg
         }
     ]
 
