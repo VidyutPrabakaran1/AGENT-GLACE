@@ -225,6 +225,7 @@ def main_loop():
 - `/exit` or `/bye` - To exit the agent.
 - `/list` - To list available/running models.
 - `/model` - To change model.
+- `/thinking` - To toggle thinking on/off.
 ''')
                     )
                 )
