@@ -55,7 +55,6 @@ try:
         tmp_status = f.read()
 
         if tmp_status == "True":
-
             thinking_status = True
 
         else:
@@ -341,7 +340,7 @@ def main_loop():
 
                 except KeyboardInterrupt:
                     print()
-                    console.print(Panel("RESPONE INTERRUPTED", style="bold red"))
+                    console.print(Panel("RESPONSE INTERRUPTED", style="bold red"))
 
                 except ollama.ResponseError:
                     with open(think_fl, "w") as f:
