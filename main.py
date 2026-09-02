@@ -221,6 +221,9 @@ def main_loop():
                 console.print(
                     Panel(
                         Markdown('''
+**Miscellaneous:**
+- Ctrl + C - To interrupt the response from the model.
+
 **Available Commands:**
 - `/exit` or `/bye` - To exit the agent.
 - `/list` - To list available/running models.
