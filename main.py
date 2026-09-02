@@ -46,6 +46,28 @@ os.makedirs(transcripts_dir, exist_ok=True)
 session_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 session_transcript_fl = os.path.join(transcripts_dir, f"Transcript_{session_time}.md")
 sys_msg_fl = os.path.join(script_dir, "storage", "SYSTEM.md")
+think_fl = os.path.join(script_dir, "config", "thinking_status")
+
+thinking_status = None
+
+try:
+    with open (think_fl, "r") as f:
+        tmp_status = f.read()
+
+        if tmp_status == "True":
+
+            thinking_status = True
+
+        else:
+            thinking_status = False
+
+except FileNotFoundError:
+    os.makedirs(os.path.dirname(think_fl), exist_ok=True)
+
+    with open (think_fl, "w") as f:
+        f.write("False")
+
+    thinking_status = False
 
 ## FUNCTIONS
 
@@ -250,6 +272,24 @@ def main_loop():
 
                 continue
 
+            elif user_input.lower() == "/thinking":
+                global thinking_status
+                if thinking_status == True:
+                    thinking_status = False
+                    with open(think_fl, "w") as f:
+                        f.write("False")
+
+                    console.print(Panel("Thinking has been turned off."))
+
+                elif thinking_status == False:
+                    thinking_status = True
+                    with open(think_fl, "w") as f:
+                        f.write("True")
+
+                    console.print(Panel("Thinking has been turned on."))
+
+                continue
+
             messages.append(
                 {
                     'role': 'user',
@@ -263,7 +303,7 @@ def main_loop():
                 model=model_name,
                 messages=context_payload,
                 stream=True,
-                think=False
+                think=thinking_status
             )
 
             def render_stream(response_stream):
@@ -298,6 +338,14 @@ def main_loop():
                 except KeyboardInterrupt:
                     print()
                     console.print(Panel("RESPONE INTERRUPTED", style="bold red"))
+
+                except ollama.ResponseError:
+                    with open(think_fl, "w") as f:
+                        f.write("False")
+
+                    global thinking_status
+                    thinking_status = False
+                    console.print(Panel("Model does not support thinking. Thinking has been turned off." , style="bold red"))
 
                 console.print()
 
