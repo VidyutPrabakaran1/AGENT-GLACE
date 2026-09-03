@@ -359,12 +359,10 @@ def main_loop():
                     #f.write(timestamp_now_formatted)
 
                     f.write("\n\nUSER: \n")
-                    f.write(user_input)
-                    f.write("\n\n")
+                    f.write(user_input + "\n")
 
                     f.write("GLACE: \n")
-                    f.write(response_txt)
-                    f.write("\n\n")
+                    f.write(response_txt + "\n")
 
                 return response_txt
 
