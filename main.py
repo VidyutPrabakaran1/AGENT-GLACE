@@ -244,6 +244,8 @@ def main_loop():
 - `/list` - To list available/running models.
 - `/model` - To change model.
 - `/thinking` - To toggle thinking on/off.
+- `/clear` - To clear conversation history from the current session memory.
+- `/context_size` - To change context window size.
 ''')
                     )
                 )
@@ -307,6 +309,39 @@ def main_loop():
 
                     console.print(Panel("Thinking has been turned on."))
 
+                continue
+
+            elif user_input.lower() == "/clear":
+                messages = [
+                    {
+                        'role': 'system',
+                        'content': system_msg
+                    }
+                ]
+                console.print(Panel("Conversation history cleared."))
+                continue
+
+            elif user_input.lower() == "/context_size":
+                while True:
+                    try:
+                        new_context_size = int(console.input("\nEnter new context window size (e.g. 6144): ").strip())
+
+                        if new_context_size <= 0:
+                            console.print(Panel(Markdown("**Invalid input. Please enter a positive integer for the context window size.**")))
+                            console.print(Rule(style="orange3"))
+                            continue
+
+                        break
+                    except ValueError:
+                        console.print(Panel(Markdown("**Invalid input. Please enter a valid positive integer for the context window size.**")))
+                        console.print(Rule(style="orange3"))
+
+                context_size = new_context_size
+                os.makedirs(os.path.dirname(context_window_fl), exist_ok=True)
+                with open(context_window_fl, "w", encoding="utf-8") as f:
+                    f.write(str(new_context_size))
+
+                console.print(Panel(Markdown(f"Context window size updated to: **{new_context_size}**")))
                 continue
 
             messages.append(
