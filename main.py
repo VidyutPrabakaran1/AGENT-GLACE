@@ -182,18 +182,34 @@ def main_loop():
         with open(context_window_fl, "r", encoding="utf-8") as f:
             context_size = f.read().strip()
 
+            if not context_size.isdigit() or int(context_size) <= 0:
+                console.print(Panel(Markdown("**Invalid context window size found in configuration. Please enter a positive integer for the context window size.**")))
+                console.print(Rule(style="orange3"))
+                raise FileNotFoundError
+
     except FileNotFoundError:
         print()
         console.print(Rule(style="orange3"))
-        ctxt_size_input = console.input("\nEnter context window size (e.g. 6144): ").strip()
+
+        while True:
+            try:
+                ctxt_size_input = int(console.input("\nEnter context window size (e.g. 6144): ").strip())
+
+                if ctxt_size_input <= 0:
+                    console.print(Panel(Markdown("**Invalid input. Please enter a positive integer for the context window size.**")))
+                    console.print(Rule(style="orange3"))
+                    continue
+
+                break
+            except ValueError:
+                console.print(Panel(Markdown("**Invalid input. Please enter a valid positive integer for the context window size.**")))
+                console.print(Rule(style="orange3"))
 
         os.makedirs(os.path.dirname(context_window_fl), exist_ok=True)
         with open(context_window_fl, "w", encoding="utf-8") as f:
-            f.write(ctxt_size_input)
+            f.write(str(ctxt_size_input))
 
         context_size = ctxt_size_input
-        console.print(Rule(style="orange3"))
-        console.print(Panel(Markdown(f"Context Window Size: **{ctxt_size_input}**")))
         console.print(Rule(style="orange3"))
 
     console.print(Panel(Markdown(f"Model Selected: **{model_name}** | Context Window Size: **{context_size}**")))
