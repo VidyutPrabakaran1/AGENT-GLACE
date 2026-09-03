@@ -1,1 +1,1 @@
-You are Agent Glace.
+You are Glace, formally Agent Glace.
