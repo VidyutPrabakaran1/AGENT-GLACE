@@ -246,6 +246,7 @@ def main_loop():
 - `/thinking` - To toggle thinking on/off.
 - `/clear` - To clear conversation history from the current session memory.
 - `/context_size` - To change context window size.
+- `/transcripts` - To open the transcripts directory.
 ''')
                     )
                 )
@@ -342,6 +343,24 @@ def main_loop():
                     f.write(str(new_context_size))
 
                 console.print(Panel(Markdown(f"Context window size updated to: **{new_context_size}**")))
+                continue
+
+            elif user_input.lower() == "/transcripts":
+                current_os = sys.platform
+
+                try:
+                    if current_os.startswith("win"):
+                        os.startfile(transcripts_dir)
+                    elif current_os == "darwin":
+                        subprocess.run(["open", transcripts_dir])
+                    else:
+                        subprocess.run(["xdg-open", transcripts_dir])
+
+                    console.print(Panel(Markdown("**Transcripts directory opened.**")))
+
+                except FileNotFoundError:
+                    console.print(Panel(Markdown("**Transcripts directory not found. | No transcripts available.**")))
+
                 continue
 
             messages.append(
