@@ -1,4 +1,4 @@
 ollama
 rich
 requests
-duckduckgo_search
+ddgs
