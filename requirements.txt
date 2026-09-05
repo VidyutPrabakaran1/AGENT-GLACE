@@ -2,3 +2,4 @@ ollama
 rich
 requests
 ddgs
+trafilatura
