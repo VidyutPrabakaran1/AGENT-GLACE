@@ -17,6 +17,9 @@ import subprocess
 from datetime import datetime
 import requests
 
+from ddgs import DDGS
+import trafilatura
+
 ## MISC
 
 console = Console()
@@ -114,6 +117,58 @@ def ollama_list_running():
 
     for model in ps_list_raw.get('models', []):
         print(model.get('name'))
+
+## TOOLS
+
+def get_web_context(query: str, max_results: int=3) -> str:
+    """
+    Searches the live web using DuckDuckGo. Use this whenever the user asks
+    about current events, recent news, real-time data, or facts you are unsure of.
+    Args:
+        query (str): A concise, 2-5 word keyword search query. NEVER pass full
+            questions or conversational filler (e.g., "Python 3.14 release notes").
+        max_results (int): Number of results to return (default 3).
+    """
+    context_parts = []
+    try:
+        with DDGS() as ddgs:
+            results = list(ddgs.text(query, max_results=max_results))
+
+            for i, result in enumerate(results):
+                title = result.get('title', 'No Title')
+                href = result.get('href', 'No URL')
+                snippet = result.get('body', '')
+
+                page_test = ''
+                try:
+                    downloaded = trafilatura.fetch_url(href)
+                    if downloaded:
+                        extracted = trafilatura.extract(
+                            downloaded, include_links=False, include_images=False
+                        )
+                        if extracted:
+                            page_text = extracted[:1500].strip()
+
+                except Exception:
+                    page_text = ''
+
+                content=page_text if page_text else snippet
+
+                context_parts.append(
+                    f'Source [{i}]: {title}\nURL: {href}\nContent:\n{content}'
+                )
+
+    except Exception as e:
+        return f"An error occurred during web search: {str(e)}"
+
+    if not context_parts:
+        return f"No results found for the query: {query}"
+
+    return "\n\n---\n\n".join(context_parts)
+
+TOOL_REGISTRY = {
+    "get_web_context": get_web_context
+}
 
 ## CODE
 
@@ -376,12 +431,14 @@ def main_loop():
                 model=model_name,
                 messages=context_payload,
                 stream=True,
+                tools=list(TOOL_REGISTRY.values()),
                 think=thinking_status
             )
 
             def render_stream(response_stream):
                 thinking_txt = ""
                 response_txt = ""
+                tool_calls_buffer = []
                 try:
                     with Live(console=console, refresh_per_second=30, transient=False) as live:
                         for chunk in response_stream:
@@ -395,11 +452,14 @@ def main_loop():
                             if content_delta:
                                 response_txt += content_delta
 
+                            if 'tool_calls' in message and message['tool_calls']:
+                                tool_calls_buffer.extend(message['tool_calls'])
+
                             renderables = []
 
                             if thinking_txt:
                                 renderables.append(Markdown('### Thinking...'))
-                                renderables.append(Text(thinking_txt, style="grey66"))
+                                renderables.append(Text(thinking_txt, style="dim"))
 
                             if response_txt:
                                 renderables.append(Markdown('### Response :'))
@@ -422,27 +482,67 @@ def main_loop():
 
                 console.print()
 
-                timestamp_now = datetime.now()
-                timestamp_now_formatted = timestamp_now.strftime("%H:%M")
+                return response_txt, tool_calls_buffer
 
-                with open(session_transcript_fl, "a", encoding="utf-8", errors="replace") as f:
-                    #f.write(timestamp_now_formatted)
-
-                    f.write("\n\nUSER: \n")
-                    f.write(user_input + "\n")
-
-                    f.write("GLACE: \n")
-                    f.write(response_txt + "\n")
-
-                return response_txt
-
-            response_txt = render_stream(stream)
+            response_txt, tool_calls = render_stream(stream)
             messages.append(
                 {
                     'role': 'assistant',
-                    'content': response_txt
+                    'content': response_txt,
+                    'tool_calls': tool_calls
                 }
             )
+
+            if tool_calls:
+                for tool in tool_calls:
+                    fn_name = tool['function']['name']
+                    fn_args = tool['function']['arguments']
+                    
+                    console.print(f"[dim] ⚙️ TOOL EXECUTION: {fn_name} for {fn_args} ⚙️[/dim]\n")
+                    
+                    # Call the actual Python function
+                    if fn_name in TOOL_REGISTRY:
+                        tool_result = TOOL_REGISTRY[fn_name](**fn_args)
+                    else:
+                        tool_result = f"Error: Tool {fn_name} not found."
+                        
+                    # Append the result as a 'tool' role
+                    messages.append(
+                        {
+                            'role': 'tool',
+                            'content': str(tool_result)
+                        }
+                    )
+                
+                # 4. Trigger a SECOND stream so the model can read the tool result and answer you
+                stream_2 = client.chat(
+                    model=model_name,
+                    messages=messages,
+                    tools=list(TOOL_REGISTRY.values()),
+                    stream=True,
+                    think=thinking_status
+                )
+                
+                # Render the final spoken answer
+                final_txt, _ = render_stream(stream_2)
+                
+                # Append the final spoken answer to history
+                messages.append(
+                    {
+                        'role': 'assistant',
+                        'content': final_txt
+                    }
+                )
+                
+                final_response_for_transcript = final_txt
+            else:
+                final_response_for_transcript = response_txt
+
+            with open(session_transcript_fl, "a", encoding="utf-8", errors="replace") as f:
+                f.write("\n\nUSER: \n")
+                f.write(user_input + "\n")
+                f.write("GLACE: \n")
+                f.write(final_response_for_transcript + "\n")
 
         except KeyboardInterrupt:
             console.print(Rule(style="orange3"))
