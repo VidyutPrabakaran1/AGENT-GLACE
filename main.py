@@ -189,10 +189,12 @@ def main_loop():
     with open(sys_msg_fl, "r") as f:
         system_msg = f.read()
 
+    system_msg_final = f"{system_msg}\n\n Current Date: {datetime.now().strftime('%Y-%m-%d')}\n\n"
+
     messages = [
         {
             'role': 'system',
-            'content': system_msg
+            'content': system_msg_final
         }
     ]
 
