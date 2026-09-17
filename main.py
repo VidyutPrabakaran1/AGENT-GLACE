@@ -13,6 +13,7 @@ from rich.panel import Panel
 import os
 import sys
 import subprocess
+import re
 
 from datetime import datetime
 import requests
@@ -48,7 +49,7 @@ transcripts_dir = os.path.join(script_dir, "storage", "transcripts")
 os.makedirs(transcripts_dir, exist_ok=True)
 session_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 session_transcript_fl = os.path.join(transcripts_dir, f"Transcript_{session_time}.md")
-sys_msg_fl = os.path.join(script_dir, "storage", "SYSTEM.md")
+sys_msg_fl = os.path.join(script_dir, "config", "SYSTEM.md")
 think_fl = os.path.join(script_dir, "config", "thinking_status")
 
 thinking_status = None
@@ -454,6 +455,8 @@ def main_loop():
                             if content_delta:
                                 response_txt += content_delta
 
+                            clean_response = re.sub(r'【.*?】', '', response_txt)
+
                             if 'tool_calls' in message and message['tool_calls']:
                                 tool_calls_buffer.extend(message['tool_calls'])
 
@@ -465,7 +468,7 @@ def main_loop():
 
                             if response_txt:
                                 renderables.append(Markdown('### Response :'))
-                                renderables.append(Markdown(response_txt))
+                                renderables.append(Markdown(clean_response))
 
                             if renderables:
                                 live.update(Group(*renderables))
@@ -484,7 +487,8 @@ def main_loop():
 
                 console.print()
 
-                return response_txt, tool_calls_buffer
+                final_clean_response = re.sub(r'【.*?】', '', response_txt)
+                return final_clean_response, tool_calls_buffer
 
             response_txt, tool_calls = render_stream(stream)
             messages.append(
