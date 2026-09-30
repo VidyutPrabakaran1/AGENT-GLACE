@@ -14,6 +14,7 @@ import os
 import sys
 import subprocess
 import re
+from pathlib import Path
 
 from datetime import datetime
 import requests
@@ -41,16 +42,17 @@ else:
 
 client = ollama.Client(host='http://127.0.0.1:11434')
 script_dir = os.path.dirname(os.path.abspath(__file__))
+home = Path.home()
 
-model_config_fl = os.path.join(script_dir, "config", "model_choice")
-context_window_fl = os.path.join(script_dir, "config", "context_window_size")
+model_config_fl = os.path.join(home, "AGENT-GLACE", "config", "model_choice")
+context_window_fl = os.path.join(home, "AGENT-GLACE", "config", "context_window_size")
 
-transcripts_dir = os.path.join(script_dir, "storage", "transcripts")
+transcripts_dir = os.path.join(home, "AGENT-GLACE", "transcripts")
 os.makedirs(transcripts_dir, exist_ok=True)
 session_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 session_transcript_fl = os.path.join(transcripts_dir, f"Transcript_{session_time}.md")
-sys_msg_fl = os.path.join(script_dir, "config", "SYSTEM.md")
-think_fl = os.path.join(script_dir, "config", "thinking_status")
+sys_msg_fl = os.path.join(script_dir, "SYSTEM.md")
+think_fl = os.path.join(home, "AGENT-GLACE", "config", "thinking_status")
 
 thinking_status = None
 
@@ -121,6 +123,7 @@ def ollama_list_running():
 
 ## TOOLS
 
+
 def get_web_context(query: str, max_results: int=3) -> str:
     """
     Searches the live web using DuckDuckGo. Use this whenever the user asks
@@ -190,7 +193,7 @@ def main_loop():
     with open(sys_msg_fl, "r") as f:
         system_msg = f.read()
 
-    system_msg_final = f"{system_msg}\n\n Current Date: {datetime.now().strftime('%Y-%m-%d')}\n\n"
+    system_msg_final = f"{system_msg}\n\n Current Date (YYYY/MM/DD): {datetime.now().strftime('%Y-%m-%d')}\n\n"
 
     messages = [
         {
