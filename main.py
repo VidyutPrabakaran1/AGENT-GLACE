@@ -123,7 +123,6 @@ def ollama_list_running():
 
 ## TOOLS
 
-
 def get_web_context(query: str, max_results: int=3) -> str:
     """
     Searches the live web using DuckDuckGo. Use this whenever the user asks
