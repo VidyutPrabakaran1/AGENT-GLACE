@@ -1,7 +1,3 @@
 __pycache__/
 *.pyc
-config/context_window_size
-config/model_choice
-config/thinking_status
-storage/
 Dockerfile
