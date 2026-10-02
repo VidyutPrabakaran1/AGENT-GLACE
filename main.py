@@ -54,6 +54,9 @@ session_transcript_fl = os.path.join(transcripts_dir, f"Transcript_{session_time
 sys_msg_fl = os.path.join(script_dir, "SYSTEM.md")
 think_fl = os.path.join(home, "AGENT-GLACE", "config", "thinking_status")
 
+SANDBOX_ROOT = Path(os.path.join(home, "AGENT-GLACE", "sandbox")).resolve()
+os.makedirs(SANDBOX_ROOT, exist_ok=True)
+
 thinking_status = None
 
 try:
@@ -169,8 +172,48 @@ def get_web_context(query: str, max_results: int=3) -> str:
 
     return "\n\n---\n\n".join(context_parts)
 
+def read_sandboxed_file(file_name: str) -> str:
+    """
+    Read a text file strictly from inside the sandboxed folder.
+    Use this whenever you need to access a text file present inside the sandboxed folder.
+    Args:
+        file_name (str): Complete filename.
+    """
+    try:
+        target_path = (SANDBOX_ROOT / file_name).resolve()
+
+        if not target_path.is_relative_to(SANDBOX_ROOT):
+            return "Error: Access denied. Path traversal attempt detected."
+            
+        if not target_path.is_file():
+            return f"Error: File '{file_name}' does not exist."
+
+        with open(target_path, "r", encoding="utf-8") as f:
+            return f.read()
+    except Exception as e:
+        return f"Error reading file: {str(e)}"
+
+def handle_sub_dir_error(error):
+        print(f"Skipping subdirectory due to error: {error.filename} ({error.strerror})")
+
+def list_sandboxed_files():
+    """
+    List all files inside the sandboxed folder.
+    Use this whenever the user asks for what files are inside the sandboxed folder (i.e. directly accessible to you).
+    List of files inside the sandboxed folder may change if the user adds or removes files so use this tool to confirm the list each
+    """
+    try:
+        for root, dirs, filenames in os.walk(SANDBOX_ROOT, onerror=handle_sub_dir_error):
+            for file in filenames:
+                return(f"Found file: {file}")
+
+    except OSError as e:
+        return(f"OS Error occured: {e}")
+
 TOOL_REGISTRY = {
-    "get_web_context": get_web_context
+    "get_web_context": get_web_context,
+    "read_sandboxed_file": read_sandboxed_file,
+    "list_sandboxed_files": list_sandboxed_files
 }
 
 ## CODE
@@ -307,6 +350,7 @@ def main_loop():
 - `/clear` - To clear conversation history from the current session memory.
 - `/context_size` - To change context window size.
 - `/transcripts` - To open the transcripts directory.
+- `/sandbox` - To open the sandbox directory.
 ''')
                     )
                 )
@@ -423,6 +467,23 @@ def main_loop():
 
                 continue
 
+            elif user_input.lower() == "/sandbox":
+                current_os = sys.platform
+            
+                try:
+                    if current_os.startswith("win"):
+                        os.startfile(SANDBOX_ROOT)
+                    elif current_os == "darwin":
+                        subprocess.run(["open", SANDBOX_ROOT])
+                    else:
+                        subprocess.run(["xdg-open", SANDBOX_ROOT])
+                    console.print(Panel(Markdown("**Sandbox directory opened.**")))
+            
+                except FileNotFoundError:
+                    console.print(Panel(Markdown("**Unable to open Sandbox directory. Try restarting Agent Glace.**")))
+                    
+                continue
+
             messages.append(
                 {
                     'role': 'user',
@@ -492,16 +553,22 @@ def main_loop():
                 final_clean_response = re.sub(r'【.*?】', '', response_txt)
                 return final_clean_response, tool_calls_buffer
 
-            response_txt, tool_calls = render_stream(stream)
-            messages.append(
-                {
+            while True:
+                response_txt, tool_calls = render_stream(stream)
+                
+                assistant_msg = {
                     'role': 'assistant',
                     'content': response_txt,
-                    'tool_calls': tool_calls
                 }
-            )
+                if tool_calls:
+                    assistant_msg['tool_calls'] = tool_calls
+                    
+                messages.append(assistant_msg)
 
-            if tool_calls:
+                if not tool_calls:
+                    final_response_for_transcript = response_txt
+                    break
+
                 for tool in tool_calls:
                     fn_name = tool['function']['name']
                     fn_args = tool['function']['arguments']
@@ -522,29 +589,17 @@ def main_loop():
                         }
                     )
                 
-                # 4. Trigger a SECOND stream so the model can read the tool result and answer you
-                stream_2 = client.chat(
+                # Re-calculate context budget
+                context_payload = get_char_budget_window(messages, max_chars=int(context_size))
+
+                # Trigger the next stream so the model can read the tool result and optionally use more tools
+                stream = client.chat(
                     model=model_name,
-                    messages=messages,
+                    messages=context_payload,
                     tools=list(TOOL_REGISTRY.values()),
                     stream=True,
                     think=thinking_status
                 )
-                
-                # Render the final spoken answer
-                final_txt, _ = render_stream(stream_2)
-                
-                # Append the final spoken answer to history
-                messages.append(
-                    {
-                        'role': 'assistant',
-                        'content': final_txt
-                    }
-                )
-                
-                final_response_for_transcript = final_txt
-            else:
-                final_response_for_transcript = response_txt
 
             with open(session_transcript_fl, "a", encoding="utf-8", errors="replace") as f:
                 f.write("\n\nUSER: \n")
