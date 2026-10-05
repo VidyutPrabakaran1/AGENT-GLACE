@@ -133,8 +133,9 @@ def get_web_context(query: str, max_results: int=3) -> str:
     Args:
         query (str): A concise, 2-5 word keyword search query. NEVER pass full
             questions or conversational filler (e.g., "Python 3.14 release notes").
-        max_results (int): Number of results to return (default 3).
+        max_results (int): Number of results to return (Minimum is 3).
     """
+    max_results = max(3, max_results)
     context_parts = []
     try:
         with DDGS() as ddgs:
@@ -194,7 +195,7 @@ def read_sandboxed_file(file_name: str) -> str:
         return f"Error reading file: {str(e)}"
 
 def handle_sub_dir_error(error):
-        print(f"Skipping subdirectory due to error: {error.filename} ({error.strerror})")
+    console.print((Markdown(f"Skipping subdirectory due to error: {error.filename} ({error.strerror})", style="dim")))
 
 def list_sandboxed_files():
     """
@@ -203,9 +204,19 @@ def list_sandboxed_files():
     List of files inside the sandboxed folder may change if the user adds or removes files so use this tool to confirm the list each
     """
     try:
-        for root, dirs, filenames in os.walk(SANDBOX_ROOT, onerror=handle_sub_dir_error):
-            for file in filenames:
-                return(f"Found file: {file}")
+        sandbox_path = Path(SANDBOX_ROOT)
+        found_items = []
+        
+        for path in sandbox_path.rglob('*'):
+            if path.is_dir():
+                found_items.append(f"Found directory: {path}")
+            elif path.is_file():
+                found_items.append(f"Found file: {path}")
+                
+        if not found_items:
+            return "No files or directories found in the sandbox."
+            
+        return "\n".join(found_items)
 
     except OSError as e:
         return(f"OS Error occured: {e}")
