@@ -46,6 +46,8 @@ home = Path.home()
 
 model_config_fl = os.path.join(home, "AGENT-GLACE", "config", "model_choice")
 context_window_fl = os.path.join(home, "AGENT-GLACE", "config", "context_window_size")
+search_engine_fl = os.path.join(home, "AGENT-GLACE", "config", "search_engine")
+sxng_url_fl = os.path.join(home, "AGENT-GLACE", "config", "searxng_url")
 
 transcripts_dir = os.path.join(home, "AGENT-GLACE", "transcripts")
 os.makedirs(transcripts_dir, exist_ok=True)
@@ -128,50 +130,95 @@ def ollama_list_running():
 
 def get_web_context(query: str, max_results: int=3) -> str:
     """
-    Searches the live web using DuckDuckGo. Use this whenever the user asks
+    Searches the live web. Use this whenever the user asks
     about current events, recent news, real-time data, or facts you are unsure of.
     Args:
         query (str): A concise, 2-5 word keyword search query. NEVER pass full
             questions or conversational filler (e.g., "Python 3.14 release notes").
         max_results (int): Number of results to return (Minimum is 3).
     """
-    max_results = max(3, max_results)
-    context_parts = []
+
     try:
-        with DDGS() as ddgs:
-            results = list(ddgs.text(query, max_results=max_results))
+        with open(search_engine_fl, "r") as f:
+            search_engine = f.read().strip()
+    except FileNotFoundError:
+        search_engine = "DDG"
 
-            for i, result in enumerate(results):
-                title = result.get('title', 'No Title')
-                href = result.get('href', 'No URL')
-                snippet = result.get('body', '')
+    if search_engine == "SXNG":
+        params = {
+            "q": query,
+            "format": "json",
+            "safesearch": 1,
+            "categories": "general,news"
+        }
 
-                page_test = ''
-                try:
-                    downloaded = trafilatura.fetch_url(href)
-                    if downloaded:
-                        extracted = trafilatura.extract(
-                            downloaded, include_links=False, include_images=False
-                        )
-                        if extracted:
-                            page_text = extracted[:1500].strip()
+        try:
+            with open(sxng_url_fl, "r") as f:
+                sxng_url = f.read().strip()
+                if not sxng_url.endswith("search"):
+                    sxng_url = f"{sxng_url.rstrip('/')}/search"
 
-                except Exception:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+            }
+            response = requests.get(sxng_url, params=params, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+            
+            results = []
+
+            for item in data.get("results", [])[:max_results]:
+                title = item.get("title", "")
+                content = item.get("content", "")
+                url = item.get("url", "")
+                results.append(f"Title: {title}\nURL: {url}\nSnippet: {content}\n")
+            
+            if not results:
+                return "No search results found."
+                
+            return "\n---\n".join(results)
+
+        except Exception as e:
+            return f"An error occurred during the web search: {str(e)}"
+
+    else:
+        max_results = max(3, max_results)
+        context_parts = []
+        try:
+            with DDGS() as ddgs:
+                results = list(ddgs.text(query, max_results=max_results))
+
+                for i, result in enumerate(results):
+                    title = result.get('title', 'No Title')
+                    href = result.get('href', 'No URL')
+                    snippet = result.get('body', '')
+
                     page_text = ''
+                    try:
+                        downloaded = trafilatura.fetch_url(href)
+                        if downloaded:
+                            extracted = trafilatura.extract(
+                                downloaded, include_links=False, include_images=False
+                            )
+                            if extracted:
+                                page_text = extracted[:1500].strip()
 
-                content=page_text if page_text else snippet
+                    except Exception:
+                        page_text = ''
 
-                context_parts.append(
-                    f'Source [{i}]: {title}\nURL: {href}\nContent:\n{content}'
-                )
+                    content=page_text if page_text else snippet
 
-    except Exception as e:
-        return f"An error occurred during web search: {str(e)}"
+                    context_parts.append(
+                        f'Source [{i}]: {title}\nURL: {href}\nContent:\n{content}'
+                    )
 
-    if not context_parts:
-        return f"No results found for the query: {query}"
+        except Exception as e:
+            return f"An error occurred during web search: {str(e)}"
 
-    return "\n\n---\n\n".join(context_parts)
+        if not context_parts:
+            return f"No results found for the query: {query}"
+
+        return "\n\n---\n\n".join(context_parts)
 
 def read_sandboxed_file(file_name: str) -> str:
     """
@@ -246,7 +293,7 @@ def main_loop():
     with open(sys_msg_fl, "r") as f:
         system_msg = f.read()
 
-    system_msg_final = f"{system_msg}\n\n Current Date (YYYY/MM/DD): {datetime.now().strftime('%Y-%m-%d')}\n\n"
+    system_msg_final = f"\n\n Current Date (YYYY/MM/DD): {datetime.now().strftime('%Y-%m-%d')}\n\n{system_msg}"
 
     messages = [
         {
@@ -307,7 +354,7 @@ def main_loop():
 
         while True:
             try:
-                ctxt_size_input = int(console.input("\nEnter context window size (e.g. 6144): ").strip())
+                ctxt_size_input = int(console.input("\nEnter context window size (e.g., 6144): ").strip())
 
                 if ctxt_size_input <= 0:
                     console.print(Panel(Markdown("**Invalid input. Please enter a positive integer for the context window size.**")))
@@ -342,7 +389,7 @@ def main_loop():
                 console.print(Panel(Markdown(" **Exiting Agent Glace...** ")), style="bold red")
                 console.print(Rule(style="orange3"))
 
-                subprocess.run(["ollama", "stop", model_name])
+                #subprocess.run(["ollama", "stop", model_name])
 
                 break
 
@@ -362,6 +409,7 @@ def main_loop():
 - `/context_size` - To change context window size.
 - `/transcripts` - To open the transcripts directory.
 - `/sandbox` - To open the sandbox directory.
+- `/search_engine` - To change search engine.
 ''')
                     )
                 )
@@ -374,7 +422,7 @@ def main_loop():
     [2] - List Running Models
                 '''))
 
-                list_input = console.input("\nEnter Option (e.g. 1): ")
+                list_input = console.input("\nEnter Option (e.g., 1): ")
                 if list_input.lower() == "1":
                     ollama_list_models()
                 elif list_input.lower() == "2":
@@ -440,7 +488,7 @@ def main_loop():
             elif user_input.lower() == "/context_size":
                 while True:
                     try:
-                        new_context_size = int(console.input("\nEnter new context window size (e.g. 6144): ").strip())
+                        new_context_size = int(console.input("\nEnter new context window size (e.g., 6144): ").strip())
 
                         if new_context_size <= 0:
                             console.print(Panel(Markdown("**Invalid input. Please enter a positive integer for the context window size.**")))
@@ -494,6 +542,42 @@ def main_loop():
                     console.print(Panel(Markdown("**Unable to open Sandbox directory. Try restarting Agent Glace.**")))
                     
                 continue
+
+            elif user_input.lower() == "/search_engine":
+                console.print(Panel(
+                    '''
+                    Search Engine Options:
+                    [1] - DuckDuckGo (No setup required)
+                    [2] - SearXNG (Requires separate SearXNG instance, with JSON output enabled)
+                    '''
+                ))
+
+                try:
+                    new_search_engine = int(console.input("\nEnter new search engine (e.g., 1): ").strip())
+
+                    if new_search_engine == 1:
+                        with open(search_engine_fl, "w") as f:
+                            f.write("DDG")
+                        se_title = "DuckDuckGo"
+                    elif new_search_engine == 2:
+                        with open(search_engine_fl, "w") as f:
+                            f.write("SXNG")
+                        tmp_sxng_url = console.input("Enter SearXNG URL (e.g., http://localhost:8080/search ): ").strip()
+                        sxng_url = tmp_sxng_url
+                        with open(sxng_url_fl, "w") as f:
+                            f.write(tmp_sxng_url)
+                        se_title = "SearXNG"
+                    else:
+                        console.print(Panel(Markdown("**Invalid input. Please enter 1 or 2 for the search engine.**")))
+                        console.print(Rule(style="orange3"))
+                        continue
+
+                    console.print(Panel(Markdown(f"Search engine updated to: **{se_title}**")))
+                    continue
+                except ValueError:
+                    console.print(Panel(Markdown("**Invalid input. Please enter a valid number for the search engine.**")))
+                    console.print(Rule(style="orange3"))
+                    continue
 
             messages.append(
                 {
@@ -623,7 +707,7 @@ def main_loop():
             console.print(Panel(Markdown(" **Exiting Agent Glace...** ")), style="bold red")
             console.print(Rule(style="orange3"))
 
-            subprocess.run(["ollama", "stop", model_name])
+            #subprocess.run(["ollama", "stop", model_name])
                     
             break
 
