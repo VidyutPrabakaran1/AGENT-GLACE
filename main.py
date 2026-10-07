@@ -15,6 +15,8 @@ import sys
 import subprocess
 import re
 from pathlib import Path
+import base64
+import math
 
 from datetime import datetime
 import requests
@@ -48,6 +50,7 @@ model_config_fl = os.path.join(home, "AGENT-GLACE", "config", "model_choice")
 context_window_fl = os.path.join(home, "AGENT-GLACE", "config", "context_window_size")
 search_engine_fl = os.path.join(home, "AGENT-GLACE", "config", "search_engine")
 sxng_url_fl = os.path.join(home, "AGENT-GLACE", "config", "searxng_url")
+vmodel_fl = os.path.join(home, "AGENT-GLACE", "config", "vmodel_choice")
 
 transcripts_dir = os.path.join(home, "AGENT-GLACE", "transcripts")
 os.makedirs(transcripts_dir, exist_ok=True)
@@ -268,10 +271,54 @@ def list_sandboxed_files():
     except OSError as e:
         return(f"OS Error occured: {e}")
 
+def get_image_context(file_path: str) -> str:
+    """
+    Provides a description of an image file.
+    Use this whenever you need to see what's in an image file path given by the user.
+    The image file path doesn't need to be inside the sandbox folder.
+    """
+    try:
+        try:
+            with open(vmodel_fl, "r", encoding="utf-8") as f:
+                vmodel_name = f.read().strip()
+
+            encode_img = base64.b64encode(Path(file_path).read_bytes()).decode()
+            desc = client.chat(model=vmodel_name, messages = [{'role': 'user', 'content': 'Describe this image for an LLM', 'images': [encode_img] } ])
+            return desc['message']['content']
+        
+        except FileNotFoundError:
+            return "No visual model selected!"
+        
+    except Exception as e:
+        return f"Error: {e}"
+
+def math_tool(expression: str) -> str:
+    """
+    Solve a mathematical expression.
+    Use this tool whenever you need to calculate something.
+    """
+    safe_dict = {
+        "__builtins__": {},
+        "sqrt": math.sqrt,
+        "pi": math.pi,
+        "e": math.e,
+        "abs": abs,
+        "round": round,
+    }
+
+    try:
+        result = eval(expression, safe_dict, {})
+        return str(result)
+        
+    except Exception as e:
+        return f"Error: {e}"
+
 TOOL_REGISTRY = {
     "get_web_context": get_web_context,
     "read_sandboxed_file": read_sandboxed_file,
-    "list_sandboxed_files": list_sandboxed_files
+    "list_sandboxed_files": list_sandboxed_files,
+    "get_image_context": get_image_context,
+    "math_tool": math_tool
 }
 
 ## CODE
@@ -293,7 +340,7 @@ def main_loop():
     with open(sys_msg_fl, "r") as f:
         system_msg = f.read()
 
-    system_msg_final = f"\n\n Current Date (YYYY/MM/DD): {datetime.now().strftime('%Y-%m-%d')}\n\n{system_msg}"
+    system_msg_final = f"\n\n Current Date: {datetime.now().strftime('%B %d, %Y')}\n\n{system_msg}"
 
     messages = [
         {
@@ -410,6 +457,7 @@ def main_loop():
 - `/transcripts` - To open the transcripts directory.
 - `/sandbox` - To open the sandbox directory.
 - `/search_engine` - To change search engine.
+- `/vision_model` - To set the vision model for image analysis.
 ''')
                     )
                 )
@@ -579,6 +627,38 @@ def main_loop():
                     console.print(Rule(style="orange3"))
                     continue
 
+            elif user_input.lower() == "/vision_model":
+                ollama_list_models()
+                print()
+                vision_model_name = ""
+                model_list = client.list().get("models", [])
+                available_models = [model. get("model") for model in model_list if model.get("model")]
+
+                while vision_model_name not in available_models:
+                    vision_model_change_input = console.input("Enter vision model name (/disable to disable vision): ").strip()
+
+                    if vision_model_change_input.lower() == "/disable":
+                        with open (vmodel_fl, "w", encoding="utf-8") as f:
+                            f.write("")
+                        console.print(Panel(Markdown("**Vision disabled**")))
+                        break
+
+                    elif vision_model_change_input in available_models:
+                        with open (vmodel_fl, "w", encoding="utf-8") as f:
+                            f.write(vision_model_change_input)
+
+                        vision_model_name = vision_model_change_input
+                        print()
+                        console.print(Rule(style="orange3"))
+                        console.print(Panel(Markdown(f"Vision Model Selected: **{vision_model_change_input}** ")))
+                        console.print(Rule(style="orange3"))
+                        break
+
+                    console.print(Panel(Markdown("**Model not found. Please enter one of the installed models shown above.**")))
+                    console.print(Rule(style="orange3"))
+
+                continue
+
             messages.append(
                 {
                     'role': 'user',
@@ -621,11 +701,11 @@ def main_loop():
                             renderables = []
 
                             if thinking_txt:
-                                renderables.append(Markdown('### Thinking...'))
+                                renderables.append(Markdown('### THINKING...'))
                                 renderables.append(Text(thinking_txt, style="dim"))
 
                             if response_txt:
-                                renderables.append(Markdown('### Response :'))
+                                renderables.append(Markdown('### RESPONSE :'))
                                 renderables.append(Markdown(clean_response))
 
                             if renderables:
@@ -670,13 +750,11 @@ def main_loop():
                     
                     console.print(f"[dim] ⚙️ TOOL EXECUTION: {fn_name} for {fn_args} ⚙️[/dim]\n")
                     
-                    # Call the actual Python function
                     if fn_name in TOOL_REGISTRY:
                         tool_result = TOOL_REGISTRY[fn_name](**fn_args)
                     else:
                         tool_result = f"Error: Tool {fn_name} not found."
                         
-                    # Append the result as a 'tool' role
                     messages.append(
                         {
                             'role': 'tool',
@@ -684,10 +762,8 @@ def main_loop():
                         }
                     )
                 
-                # Re-calculate context budget
                 context_payload = get_char_budget_window(messages, max_chars=int(context_size))
 
-                # Trigger the next stream so the model can read the tool result and optionally use more tools
                 stream = client.chat(
                     model=model_name,
                     messages=context_payload,
