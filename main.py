@@ -131,7 +131,7 @@ def ollama_list_running():
 
 ## TOOLS
 
-def get_web_context(query: str, max_results: int=3) -> str:
+def web_search(query: str, max_results: int=3) -> str:
     """
     Searches the live web. Use this whenever the user asks
     about current events, recent news, real-time data, or facts you are unsure of.
@@ -314,7 +314,7 @@ def math_tool(expression: str) -> str:
         return f"Error: {e}"
 
 TOOL_REGISTRY = {
-    "get_web_context": get_web_context,
+    "web_search": web_search,
     "read_sandboxed_file": read_sandboxed_file,
     "list_sandboxed_files": list_sandboxed_files,
     "get_image_context": get_image_context,
