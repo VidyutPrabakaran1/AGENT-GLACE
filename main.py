@@ -313,12 +313,23 @@ def math_tool(expression: str) -> str:
     except Exception as e:
         return f"Error: {e}"
 
+def check_internet():
+    """
+    Checks if there is an internet connection.
+    """
+    try:
+        requests.get("https://www.example.com", timeout=5)
+        return True
+    except Exception as e:
+        return False
+
 TOOL_REGISTRY = {
     "web_search": web_search,
     "read_sandboxed_file": read_sandboxed_file,
     "list_sandboxed_files": list_sandboxed_files,
     "get_image_context": get_image_context,
-    "math_tool": math_tool
+    "math_tool": math_tool,
+    "check_internet": check_internet
 }
 
 ## CODE
