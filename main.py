@@ -323,13 +323,31 @@ def check_internet():
     except Exception as e:
         return False
 
+def open_app(appname: str) -> str:
+    """
+    Opens an application.
+    Use this tool whenever you need to open an application.
+    Some applications may not open due to permissions or other issues.
+    """
+    try:
+        if sys.platform == "win32":
+            os.startfile(appname)
+        elif sys.platform == "darwin":
+            subprocess.call(["open", appname])
+        else:
+            subprocess.call(["xdg-open", appname])
+        return f"Application '{appname}' opened successfully."
+    except Exception as e:
+        return f"Error: {e}"
+
 TOOL_REGISTRY = {
     "web_search": web_search,
     "read_sandboxed_file": read_sandboxed_file,
     "list_sandboxed_files": list_sandboxed_files,
     "get_image_context": get_image_context,
     "math_tool": math_tool,
-    "check_internet": check_internet
+    "check_internet": check_internet,
+    "open_app": open_app
 }
 
 ## CODE
