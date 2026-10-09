@@ -51,6 +51,7 @@ context_window_fl = os.path.join(home, "AGENT-GLACE", "config", "context_window_
 search_engine_fl = os.path.join(home, "AGENT-GLACE", "config", "search_engine")
 sxng_url_fl = os.path.join(home, "AGENT-GLACE", "config", "searxng_url")
 vmodel_fl = os.path.join(home, "AGENT-GLACE", "config", "vmodel_choice")
+mem_fl = os.path.join(home, "AGENT-GLACE", "MEMORY.md")
 
 transcripts_dir = os.path.join(home, "AGENT-GLACE", "transcripts")
 os.makedirs(transcripts_dir, exist_ok=True)
@@ -131,10 +132,34 @@ def ollama_list_running():
 
 ## TOOLS
 
+def save_to_memory(information: str) -> str:
+    """
+    Saves important, reusable information to long-term memory.
+    Use this tool whenever the user explicitly asks you to remember something, or when you discover important information such as user preferences, system configurations, long-term goals, or environmental constraints that will be needed in future interactions. Keep the information concise and structured. DO NOT save transient information or conversational filler.
+    """
+    try:
+        with open(mem_fl, "a") as f:
+            f.write(information + "\n")
+        return f"Information saved to memory successfully."
+    except Exception as e:
+        return f"Error: {e}"
+
+def read_memory() -> str:
+    """
+    Reads information from long-term memory.
+    Use this tool at the start of tasks where user preferences, past configurations, or long-term context might be relevant, or when the user refers to something they told you previously. Always proactively read memory if you are unsure about the user's environment, preferences, or if the current task feels underspecified.
+    """
+    try:
+        with open(mem_fl, "r") as f:
+            return f.read()
+    except Exception as e:
+        return f"Error: {e}"
+
 def web_search(query: str, max_results: int=3) -> str:
     """
     Searches the live web. Use this whenever the user asks
     about current events, recent news, real-time data, or facts you are unsure of.
+    NOTE: This returns TEXT ONLY. Do not use this to show images, videos, or maps. If the user wants to see an image, construct an image search URL and use the `open_webpage` tool instead.
     Args:
         query (str): A concise, 2-5 word keyword search query. NEVER pass full
             questions or conversational filler (e.g., "Python 3.14 release notes").
@@ -340,14 +365,33 @@ def open_app(appname: str) -> str:
     except Exception as e:
         return f"Error: {e}"
 
+def open_webpage(url: str) -> str:
+    """
+    Opens a web page in the default browser.
+    CRITICAL: Use this tool whenever the user asks you to "show" them visual media like images, videos, maps, or UI elements, OR if they ask to search or navigate to specific content on a website (e.g., "search for cats on youtube" or "open my reddit notifications"). The `web_search` tool ONLY returns text and CANNOT show images or open deep links.
+    - If asked to see an image: construct an image search URL (e.g., `https://www.google.com/search?tbm=isch&q=your+search+term`).
+    - If asked to search a specific site: construct its search URL (e.g., `https://www.youtube.com/results?search_query=cats`).
+    - If asked to open a specific page/feature on a site (e.g., reddit notifications, github repos): logically deduce the deep link URL (e.g., `https://www.reddit.com/notifications`) and open it.
+    Also use this when asked to "open" a generic website or link.
+    """
+    import webbrowser
+    try:
+        webbrowser.open(url)
+        return f"Web page '{url}' opened successfully."
+    except Exception as e:
+        return f"Error: {e}"
+
 TOOL_REGISTRY = {
+    "save_to_memory": save_to_memory,
+    "read_memory": read_memory,
     "web_search": web_search,
     "read_sandboxed_file": read_sandboxed_file,
     "list_sandboxed_files": list_sandboxed_files,
     "get_image_context": get_image_context,
     "math_tool": math_tool,
     "check_internet": check_internet,
-    "open_app": open_app
+    "open_app": open_app,
+    "open_webpage": open_webpage
 }
 
 ## CODE
