@@ -253,10 +253,14 @@ def read_sandboxed_file(file_name: str) -> str:
     Read a text file strictly from inside the sandboxed folder.
     Use this whenever you need to access a text file present inside the sandboxed folder.
     Args:
-        file_name (str): Complete filename.
+        file_name (str): Filename or path from list_sandboxed_files.
     """
     try:
-        target_path = (SANDBOX_ROOT / file_name).resolve()
+        relative_path = Path(file_name)
+        if relative_path.parts and relative_path.parts[0] == "SANDBOX":
+            relative_path = Path(*relative_path.parts[1:])
+
+        target_path = (SANDBOX_ROOT / relative_path).resolve()
 
         if not target_path.is_relative_to(SANDBOX_ROOT):
             return "Error: Access denied. Path traversal attempt detected."
@@ -283,10 +287,9 @@ def list_sandboxed_files():
         found_items = []
         
         for path in sandbox_path.rglob('*'):
-            if path.is_dir():
-                found_items.append(f"Found directory: {path}")
-            elif path.is_file():
-                found_items.append(f"Found file: {path}")
+            if path.is_dir() or path.is_file():
+                relative_path = path.relative_to(sandbox_path).as_posix()
+                found_items.append(f"SANDBOX/{relative_path}")
                 
         if not found_items:
             return "No files or directories found in the sandbox."
@@ -754,7 +757,7 @@ def main_loop():
                 response_txt = ""
                 tool_calls_buffer = []
                 try:
-                    with Live(console=console, refresh_per_second=30, transient=False) as live:
+                    with Live(console=console, refresh_per_second=60, transient=False) as live:
                         for chunk in response_stream:
                             message = chunk.get('message', {})
 
