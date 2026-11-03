@@ -237,6 +237,9 @@ def web_search(query: str, max_results: int=3) -> str:
                     href = result.get('href', 'No URL')
                     snippet = result.get('body', '')
 
+                    if href and isinstance(href, str) and not href.startswith(('http://', 'https://')):
+                        href = 'https://' + href.lstrip('/')
+
                     page_text = ''
                     try:
                         downloaded = trafilatura.fetch_url(href)
