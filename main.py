@@ -790,7 +790,7 @@ def main_loop():
                 threading.Thread(target=pump, daemon=True).start()
 
                 try:
-                    
+
                     with Live(console=console, refresh_per_second=60, transient=True, vertical_overflow="crop") as live:
                         stream_done = False
 
@@ -914,7 +914,23 @@ def main_loop():
                     console.print(f"[dim] ⚙️ TOOL EXECUTION: {fn_name} for {fn_args} ⚙️[/dim]\n")
                     
                     if fn_name in TOOL_REGISTRY:
-                        tool_result = TOOL_REGISTRY[fn_name](**fn_args)
+                        try:
+                            tool_result = TOOL_REGISTRY[fn_name](**fn_args)
+                        except TypeError as te:
+                            bad_arg = None
+                            m = re.search(r"unexpected keyword argument '([^']+)'", str(te))
+                            if m:
+                                bad_arg = m.group(1)
+                            console.print(f"[orange3] ⚠️ Invalid params for {fn_name}: {te}[/orange3]\n")
+                            tool_result = (
+                                f"Error: {fn_name}() called with invalid arguments: {te}. "
+                                f"Use the tool's parameter schema exactly and call it again."
+                            )
+                            if bad_arg:
+                                tool_result += f" Remove the unsupported argument '{bad_arg}'."
+                        except Exception as e:
+                            console.print(f"[orange3] ⚠️ Tool {fn_name} failed: {e}[/orange3]\n")
+                            tool_result = f"Error: Tool {fn_name} raised {type(e).__name__}: {e}"
                     else:
                         tool_result = f"Error: Tool {fn_name} not found."
 
