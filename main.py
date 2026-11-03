@@ -101,11 +101,22 @@ def get_char_budget_window(messages, max_chars):
     selected_hist = []
     current_chars = 0
 
-    for msg in reversed(convo_hist):
-        msg_len = len(msg["content"])
+    for idx, msg in enumerate(reversed(convo_hist)):
+        content = msg.get("content") or ""
+        msg_len = len(content)
+        room = remaining_budget - current_chars
+
+        # The newest message must ALWAYS survive. If it alone is bigger
+        # than the budget (e.g. a fat web_search tool result), truncate it
+        # to half the budget instead of dropping everything and sending a
+        # system-prompt-only context (which makes the model greet like a
+        # brand-new session).
+        if idx == 0 and msg_len > room and room > 0:
+            content = content[: max(room // 2, 1000)] + "\n...[truncated]"
+            msg_len = len(content)
 
         if current_chars + msg_len <= remaining_budget:
-            selected_hist.insert(0, msg)
+            selected_hist.insert(0, dict(msg, content=content))
             current_chars += msg_len
 
         else:
@@ -134,6 +145,8 @@ def ollama_list_running():
         print(model.get('name'))
 
 ## TOOLS
+
+MAX_TOOL_RESULT_CHARS = 4000
 
 def save_to_memory(information: str) -> str:
     """
@@ -606,7 +619,7 @@ def main_loop():
                 messages = [
                     {
                         'role': 'system',
-                        'content': system_msg
+                        'content': system_msg_final
                     }
                 ]
                 console.print(Panel("Conversation history cleared."))
@@ -752,7 +765,8 @@ def main_loop():
                 messages=context_payload,
                 stream=True,
                 tools=list(TOOL_REGISTRY.values()),
-                think=thinking_status
+                think=thinking_status,
+                options={'num_ctx': int(context_size)}
             )
 
             def render_stream(response_stream):
@@ -891,11 +905,15 @@ def main_loop():
                         tool_result = TOOL_REGISTRY[fn_name](**fn_args)
                     else:
                         tool_result = f"Error: Tool {fn_name} not found."
-                        
+
+                    tool_content = str(tool_result)
+                    if len(tool_content) > MAX_TOOL_RESULT_CHARS:
+                        tool_content = tool_content[:MAX_TOOL_RESULT_CHARS] + "\n...[truncated to fit context]"
+
                     messages.append(
                         {
                             'role': 'tool',
-                            'content': str(tool_result)
+                            'content': tool_content
                         }
                     )
                 
@@ -906,7 +924,8 @@ def main_loop():
                     messages=context_payload,
                     tools=list(TOOL_REGISTRY.values()),
                     stream=True,
-                    think=thinking_status
+                    think=thinking_status,
+                    options={'num_ctx': int(context_size)}
                 )
 
             with open(session_transcript_fl, "a", encoding="utf-8", errors="replace") as f:
