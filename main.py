@@ -21,6 +21,8 @@ from pathlib import Path
 import base64
 import math
 
+from difflib import SequenceMatcher
+
 from datetime import datetime
 import requests
 
@@ -86,6 +88,224 @@ except FileNotFoundError:
 
     thinking_status = False
 
+## MEMORY
+
+MEMORY_INJECT_CHARS = 3000
+SUMMARY_TRANSCRIPT_CHARS = 8000
+
+MEMORY_STOPWORDS = {
+    "is", "are", "was", "were", "the", "has", "have", "had",
+    "and", "or", "at", "in", "of", "to", "for", "on", "with", "user", "this", "that",
+}
+
+def memory_tokens(line: str) -> set:
+    words = re.findall(r"[a-z0-9]+", line.lower())
+    return {w for w in words if w not in MEMORY_STOPWORDS and len(w) > 2}
+
+def similar_memory_lines(line_a: str, line_b: str) -> bool:
+    """
+    True when two memory lines carry the same fact despite rephrasing.
+    Compares content-word overlap; falls back to raw string similarity
+    for short lines where tokens are weak.
+    """
+    tokens_a = memory_tokens(line_a)
+    tokens_b = memory_tokens(line_b)
+
+    if not tokens_a or not tokens_b:
+        return False
+
+    overlap = len(tokens_a & tokens_b) / len(tokens_a | tokens_b)
+    if overlap >= 0.7:
+        return True
+
+    return SequenceMatcher(None, line_a.lower(), line_b.lower()).ratio() >= 0.85
+
+def load_memory_text() -> str:
+    try:
+        with open(mem_fl, "r", encoding="utf-8") as f:
+            return f.read().strip()
+
+    except FileNotFoundError:
+        os.makedirs(os.path.dirname(mem_fl), exist_ok=True)
+        return ""
+
+def build_system_message() -> str:
+    try:
+        with open(sys_msg_fl, "r", encoding="utf-8") as f:
+            system_msg = f.read()
+
+    except FileNotFoundError:
+        system_msg = ""
+
+    memory_section = ""
+    memory_text = load_memory_text()
+
+    if memory_text:
+        recent_memory = memory_text[-MEMORY_INJECT_CHARS:]
+        memory_section = (
+            "\n\n## Long-Term Memory (carried over from previous sessions)\n"
+            "Facts below are durable knowledge about the user, their environment, and past decisions.\n"
+            "Treat them as true unless the user says otherwise.\n\n"
+            f"{recent_memory}"
+        )
+
+        if len(memory_text) > MEMORY_INJECT_CHARS:
+            memory_section += (
+                "\n\n(Older memory was trimmed out. Use the `read_memory` tool "
+                "for the full file and `search_history` to look through past transcripts.)"
+            )
+
+    return (
+        f"\n\n Current Date: {datetime.now().strftime('%B %d, %Y')}\n\n"
+        f"{system_msg}{memory_section}"
+    )
+
+def append_memory(new_text: str, header: str = None) -> int:
+    """
+    Appends only NEW facts to MEMORY.md, skipping lines that duplicate
+    existing memory (even when rephrased). The header is written only
+    when at least one fact survives dedup, so no empty sections appear.
+    """
+    existing_lines = [line.strip() for line in load_memory_text().splitlines() if line.strip()]
+
+    incoming_lines = [
+        line.strip() for line in new_text.splitlines()
+        if line.strip() and not line.strip().startswith("## Session")
+    ]
+
+    fresh_lines = []
+
+    for line in incoming_lines:
+        against = existing_lines + fresh_lines
+        if any(similar_memory_lines(line, other) for other in against):
+            continue
+
+        fresh_lines.append(line)
+
+    if not fresh_lines:
+        return 0
+
+    os.makedirs(os.path.dirname(mem_fl), exist_ok=True)
+    with open(mem_fl, "a", encoding="utf-8") as f:
+        if header:
+            f.write(header + "\n")
+        f.write("\n".join(fresh_lines) + "\n")
+
+    return len(fresh_lines)
+
+def compact_memory() -> int:
+    """
+    Removes rephrased duplicates already sitting in MEMORY.md, keeping the
+    first occurrence of each fact. Also drops session headers that lost
+    every fact under them. Returns how many lines were removed.
+    """
+    lines = [line.strip() for line in load_memory_text().splitlines() if line.strip()]
+
+    kept = []
+    facts_kept = []
+
+    for line in lines:
+        if line.startswith("#"):
+            kept.append(line)
+            continue
+
+        if any(similar_memory_lines(line, other) for other in facts_kept):
+            continue
+
+        kept.append(line)
+        facts_kept.append(line)
+
+    cleaned = []
+
+    for idx, line in enumerate(kept):
+        if line.startswith("## Session"):
+            next_line = kept[idx + 1].strip() if idx + 1 < len(kept) else ""
+
+            if not next_line or next_line.startswith("#"):
+                continue
+
+        cleaned.append(line)
+
+    removed = len(lines) - len(cleaned)
+
+    if removed <= 0:
+        return 0
+
+    with open(mem_fl, "w", encoding="utf-8") as f:
+        f.write("\n".join(cleaned) + "\n")
+
+    return removed
+
+def summarize_session(messages, model_name, context_size):
+    """
+    Asks the model itself to extract durable facts from the current
+    conversation. Returns a bullet-list summary or None if there is
+    nothing worth remembering.
+    """
+    transcript_lines = []
+
+    for msg in messages:
+        role = msg.get('role')
+        content = (msg.get('content') or '').strip()
+
+        if not content:
+            continue
+
+        if role == 'user':
+            transcript_lines.append(f"USER: {content}")
+        elif role == 'assistant':
+            transcript_lines.append(f"GLACE: {content}")
+
+    if len(transcript_lines) < 2:
+        return None
+
+    transcript = "\n\n".join(transcript_lines)[-SUMMARY_TRANSCRIPT_CHARS:]
+
+    existing_memory = load_memory_text()
+    existing_memory_block = ""
+
+    if existing_memory:
+        existing_memory_block = (
+            f"\n\nEXISTING MEMORY (do NOT repeat facts already listed here; only output NEW facts):\n"
+            f"{existing_memory[-3000:]}"
+        )
+
+    extraction_prompt = f"""Below is the transcript of a conversation between the user and an AI assistant.
+
+Your job: extract ONLY durable, reusable knowledge for future sessions. Include:
+- User preferences (name, style, likes/dislikes)
+- Facts about the user's environment (OS, hardware, projects, file paths, tools)
+- Long-term goals, decisions, and commitments
+- Important corrections the user made
+
+EXCLUDE everything transient: small talk, one-off task steps, temporary file contents, anything only relevant to this session.{existing_memory_block}
+
+Output format: plain markdown bullet lines (one fact per line, "- fact"). Keep each line short and self-contained.
+If there is genuinely nothing new to remember, output exactly: NONE
+
+TRANSCRIPT:
+{transcript}"""
+
+    try:
+        response = client.chat(
+            model=model_name,
+            messages=[{'role': 'user', 'content': extraction_prompt}],
+            stream=False,
+            options={'num_ctx': int(context_size)}
+        )
+
+        summary = response['message']['content'].strip()
+        summary = re.sub(r'<think>.*?</think>', '', summary, flags=re.DOTALL).strip()
+
+        if not summary or summary.upper().startswith("NONE"):
+            return None
+
+        return summary
+
+    except Exception as e:
+        console.print(Panel(f"Memory consolidation failed: {e}", style="bold red"))
+        return None
+
 ## FUNCTIONS
 
 def get_char_budget_window(messages, max_chars):
@@ -106,11 +326,6 @@ def get_char_budget_window(messages, max_chars):
         msg_len = len(content)
         room = remaining_budget - current_chars
 
-        # The newest message must ALWAYS survive. If it alone is bigger
-        # than the budget (e.g. a fat web_search tool result), truncate it
-        # to half the budget instead of dropping everything and sending a
-        # system-prompt-only context (which makes the model greet like a
-        # brand-new session).
         if idx == 0 and msg_len > room and room > 0:
             content = content[: max(room // 2, 1000)] + "\n...[truncated]"
             msg_len = len(content)
@@ -154,22 +369,116 @@ def save_to_memory(information: str) -> str:
     Use this tool whenever the user explicitly asks you to remember something, or when you discover important information such as user preferences, system configurations, long-term goals, or environmental constraints that will be needed in future interactions. Keep the information concise and structured. DO NOT save transient information or conversational filler.
     """
     try:
-        with open(mem_fl, "a") as f:
-            f.write(information + "\n")
-        return f"Information saved to memory successfully."
+        added = append_memory(information)
+
+        if added == 0:
+            return "Already in memory; nothing new saved."
+
+        return f"Information saved to memory successfully ({added} new lines)."
+
     except Exception as e:
         return f"Error: {e}"
 
 def read_memory() -> str:
     """
-    Reads information from long-term memory.
-    Use this tool at the start of tasks where user preferences, past configurations, or long-term context might be relevant, or when the user refers to something they told you previously. Always proactively read memory if you are unsure about the user's environment, preferences, or if the current task feels underspecified.
+    Reads the FULL long-term memory file.
+    The most recent memories are already injected into your context under the "Long-Term Memory" section, so you usually do NOT need this tool. Only call it when you suspect older entries you need were trimmed from that section, or the user explicitly asks to see their stored memories.
     """
     try:
-        with open(mem_fl, "r") as f:
-            return f.read()
+        return load_memory_text()
     except Exception as e:
         return f"Error: {e}"
+
+def search_history(query: str, max_files: int = 3) -> str:
+    """
+    Searches past conversation transcripts (markdown files) for a TOPIC KEYWORD.
+    Use this ONLY when the user refers to a past conversation about a specific topic
+    (e.g., "that python script we wrote", "what did I say about the server setup").
+    For recency questions without a topic ("what did I ask last time?", "what did
+    we talk about?"), NEVER use this tool — use `read_recent_history` instead.
+    NEVER pass meta-words like "last", "previous", "yesterday", "convo", or
+    "remember" as the query; they will not match anything.
+    Args:
+        query (str): The keyword or phrase to search for. Keep it short (1-3 words).
+        max_files (int): How many recent transcript files to search (default 3).
+    """
+    q = query.lower().strip()
+
+    if not q:
+        return "Error: empty query."
+
+    transcript_files = sorted(Path(transcripts_dir).glob("*.md"), key=lambda p: p.name, reverse=True)
+
+    if not transcript_files:
+        return "No past transcripts exist yet."
+
+    results = []
+
+    for path in transcript_files[:max(1, max_files)]:
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+
+        file_hits = []
+
+        for lineno, line in enumerate(text.splitlines(), 1):
+            if q in line.lower():
+                file_hits.append(f"  - line {lineno}: {line.strip()[:200]}")
+
+            if len(file_hits) >= 3:
+                break
+
+        if file_hits:
+            results.append(f"{path.name}:\n" + "\n".join(file_hits))
+
+    if not results:
+        return (
+            f"No mentions of '{query}' found in the last {max_files} transcripts. "
+            "If the user was asking about a recent conversation without a specific topic "
+            "(e.g., 'what did we talk about?'), try the `read_recent_history` tool instead."
+        )
+
+    return "\n\n".join(results)
+
+def read_recent_history(files_back: int = 1, max_lines: int = 40) -> str:
+    """
+    Shows the tail end of a recent conversation transcript, newest-first.
+    Use this whenever the user refers to a recent chat WITHOUT mentioning a specific
+    topic (e.g., "what did I ask last time?", "what did we talk about?", "continue
+    where we left off"). NEVER use `search_history` for those questions.
+    Args:
+        files_back (int): 1 = most recent transcript, 2 = the one before it, and so on.
+        max_lines (int): How many transcript lines to show (default 40).
+    """
+    transcript_files = sorted(Path(transcripts_dir).glob("*.md"), key=lambda p: p.name, reverse=True)
+
+    if not transcript_files:
+        return "No past transcripts exist yet."
+
+    if files_back < 1 or files_back > len(transcript_files):
+        return f"Only {len(transcript_files)} transcripts exist. Use files_back between 1 and {len(transcript_files)}."
+
+    path = transcript_files[files_back - 1]
+
+    try:
+        lines = [ln.strip() for ln in path.read_text(encoding="utf-8", errors="replace").splitlines() if ln.strip()]
+    except Exception as e:
+        return f"Error reading transcript: {e}"
+
+    max_lines = max(10, max_lines)
+    selected = lines[-max_lines:]
+
+    header = f"Transcript: {path.name}"
+    if len(lines) > len(selected):
+        header += f" (showing last {len(selected)} of {len(lines)} lines)"
+
+    listing = "\n".join(f"  - {item.name}" for item in transcript_files[:5])
+
+    return (
+        f"Recent transcripts (newest first):\n{listing}\n\n"
+        f"{header}:\n" + "\n".join(selected)
+    )
 
 def web_search(query: str, max_results: int=3) -> str:
     """
@@ -406,6 +715,8 @@ def open_webpage(url: str) -> str:
 TOOL_REGISTRY = {
     "save_to_memory": save_to_memory,
     "read_memory": read_memory,
+    "search_history": search_history,
+    "read_recent_history": read_recent_history,
     "web_search": web_search,
     "read_sandboxed_file": read_sandboxed_file,
     "list_sandboxed_files": list_sandboxed_files,
@@ -432,10 +743,7 @@ console.print(Rule(style="orange3"))
 def main_loop():
     model_name = ""
 
-    with open(sys_msg_fl, "r") as f:
-        system_msg = f.read()
-
-    system_msg_final = f"\n\n Current Date: {datetime.now().strftime('%B %d, %Y')}\n\n{system_msg}"
+    system_msg_final = build_system_message()
 
     messages = [
         {
@@ -443,6 +751,39 @@ def main_loop():
             'content': system_msg_final
         }
     ]
+
+    had_conversation = False
+
+    def consolidate_memory():
+        """
+        Runs once when a session (or its history) ends: extracts durable
+        facts from `messages` and appends them to MEMORY.md.
+        """
+        nonlocal had_conversation
+
+        if not had_conversation:
+            return
+
+        had_conversation = False
+
+        console.print(Rule(style="orange3"))
+        console.print(Panel("Consolidating this session into long-term memory..."))
+
+        summary = summarize_session(messages, model_name, context_size)
+
+        if summary:
+            compact_memory()
+            added = append_memory(summary, header=f"\n## Session {session_time}")
+
+            if added:
+                console.print(Panel(f"Saved {added} new memory lines."))
+            else:
+                console.print(Panel("Session matched existing memory. Nothing new saved."))
+
+        else:
+            console.print(Panel("Nothing durable enough to remember from this session."))
+
+        console.print(Rule(style="orange3"))
 
     try:
         with open(model_config_fl, "r", encoding="utf-8") as f:
@@ -527,6 +868,7 @@ def main_loop():
             console.print()
 
             if user_input.lower() == "/exit" or user_input.lower() == "/bye":
+                consolidate_memory()
                 console.print(Rule(style="orange3"))
                 console.print(Panel(Markdown(" **Exiting Agent Glace...** ")), style="bold red")
                 console.print(Rule(style="orange3"))
@@ -619,13 +961,14 @@ def main_loop():
                 continue
 
             elif user_input.lower() == "/clear":
+                consolidate_memory()
                 messages = [
                     {
                         'role': 'system',
-                        'content': system_msg_final
+                        'content': build_system_message()
                     }
                 ]
-                console.print(Panel("Conversation history cleared."))
+                console.print(Panel("Conversation cleared. Durable facts were saved to long-term memory."))
                 continue
 
             elif user_input.lower() == "/context_size":
@@ -760,6 +1103,8 @@ def main_loop():
                     'content': user_input
                 }
             )
+
+            had_conversation = True
 
             context_payload = get_char_budget_window(messages, max_chars=int(context_size))
 
@@ -966,6 +1311,7 @@ def main_loop():
                 f.write(final_response_for_transcript + "\n")
 
         except KeyboardInterrupt:
+            consolidate_memory()
             console.print(Rule(style="orange3"))
             console.print(Panel(Markdown(" **Exiting Agent Glace...** ")), style="bold red")
             console.print(Rule(style="orange3"))
