@@ -762,10 +762,6 @@ def main_loop():
                 shown_thinking = 0
                 tool_calls_buffer = []
 
-                # Ollama emits one chunk per token, so a word like " quick"
-                # arrives as a single step. Pull tokens at full speed on a
-                # background thread and reveal their characters at a steady
-                # pace instead, so the output types out smoothly.
                 tokens = queue.Queue()
 
                 def pump():
