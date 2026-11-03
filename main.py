@@ -14,6 +14,9 @@ import os
 import sys
 import subprocess
 import re
+import queue
+import threading
+import time
 from pathlib import Path
 import base64
 import math
@@ -755,39 +758,101 @@ def main_loop():
             def render_stream(response_stream):
                 thinking_txt = ""
                 response_txt = ""
+                shown_response = 0
+                shown_thinking = 0
                 tool_calls_buffer = []
+
+                # Ollama emits one chunk per token, so a word like " quick"
+                # arrives as a single step. Pull tokens at full speed on a
+                # background thread and reveal their characters at a steady
+                # pace instead, so the output types out smoothly.
+                tokens = queue.Queue()
+
+                def pump():
+                    try:
+                        for chunk in response_stream:
+                            tokens.put(chunk)
+                    except BaseException as exc:
+                        tokens.put(exc)
+                    finally:
+                        tokens.put(None)
+
+                threading.Thread(target=pump, daemon=True).start()
+
                 try:
                     with Live(console=console, refresh_per_second=60, transient=False) as live:
-                        for chunk in response_stream:
-                            message = chunk.get('message', {})
+                        stream_done = False
 
-                            thinking_delta = message.get('thinking', '')
-                            if thinking_delta:
-                                thinking_txt += thinking_delta
+                        while True:
+                            # 1) Drain every chunk that has arrived (never blocks).
+                            while True:
+                                try:
+                                    chunk = tokens.get_nowait()
+                                except queue.Empty:
+                                    break
 
-                            content_delta = message.get('content', '')
-                            if content_delta:
-                                response_txt += content_delta
+                                if chunk is None:
+                                    stream_done = True
+                                    break
 
-                            clean_response = re.sub(r'【.*?】', '', response_txt)
+                                if isinstance(chunk, BaseException):
+                                    raise chunk
 
-                            if 'tool_calls' in message and message['tool_calls']:
-                                tool_calls_buffer.extend(message['tool_calls'])
+                                message = chunk.get('message', {})
 
-                            renderables = []
+                                thinking_delta = message.get('thinking', '')
+                                if thinking_delta:
+                                    thinking_txt += thinking_delta
 
-                            if thinking_txt:
-                                renderables.append(Markdown('### THINKING...'))
-                                renderables.append(Text(thinking_txt, style="dim"))
+                                content_delta = message.get('content', '')
+                                if content_delta:
+                                    response_txt += content_delta
 
-                            if response_txt:
-                                renderables.append(Markdown('### RESPONSE :'))
-                                renderables.append(Markdown(clean_response))
+                                if 'tool_calls' in message and message['tool_calls']:
+                                    tool_calls_buffer.extend(message['tool_calls'])
 
-                            if renderables:
-                                live.update(Group(*renderables))
+                            # 2) Reveal characters. A bigger backlog means a
+                            # bigger step, so we catch up within ~0.25s.
+                            dirty = False
+
+                            response_backlog = len(response_txt) - shown_response
+                            if response_backlog > 0:
+                                shown_response += max(1, response_backlog // 16)
+                                dirty = True
+
+                            thinking_backlog = len(thinking_txt) - shown_thinking
+                            if thinking_backlog > 0:
+                                shown_thinking += max(1, thinking_backlog // 16)
+                                dirty = True
+
+                            # 3) Render only the revealed prefix.
+                            if dirty:
+                                renderables = []
+
+                                if shown_thinking:
+                                    renderables.append(Markdown('### THINKING...'))
+                                    renderables.append(Text(thinking_txt[:shown_thinking], style="dim"))
+
+                                if shown_response:
+                                    clean_response = re.sub(r'【.*?】', '', response_txt[:shown_response])
+                                    renderables.append(Markdown('### RESPONSE :'))
+                                    renderables.append(Markdown(clean_response))
+
+                                if renderables:
+                                    live.update(Group(*renderables))
+
+                            if (stream_done
+                                    and shown_response >= len(response_txt)
+                                    and shown_thinking >= len(thinking_txt)):
+                                break
+
+                            time.sleep(1 / 60)
 
                 except KeyboardInterrupt:
+                    try:
+                        response_stream.close()
+                    except Exception:
+                        pass
                     print()
                     console.print(Panel("RESPONSE INTERRUPTED", style="bold red"))
 
