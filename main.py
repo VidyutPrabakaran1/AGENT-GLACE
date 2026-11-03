@@ -790,11 +790,7 @@ def main_loop():
                 threading.Thread(target=pump, daemon=True).start()
 
                 try:
-                    # transient=True erases the live region on exit, and
-                    # vertical_overflow="crop" keeps only the newest lines
-                    # visible when the content outgrows the screen (a Live
-                    # region can NEVER scroll: it repaints in place and is
-                    # capped at one terminal screenful).
+                    
                     with Live(console=console, refresh_per_second=60, transient=True, vertical_overflow="crop") as live:
                         stream_done = False
 
@@ -883,9 +879,6 @@ def main_loop():
 
                 final_clean_response = re.sub(r'【.*?】', '', response_txt)
 
-                # The Live region is erased by now (transient=True), so the
-                # full finished message is printed here into normal
-                # scrollback, where the terminal can scroll through it.
                 if thinking_txt:
                     console.print(Markdown('### THINKING...'))
                     console.print(Text(thinking_txt, style="dim"))
