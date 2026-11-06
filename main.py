@@ -33,19 +33,38 @@ import trafilatura
 
 console = Console()
 
+def read_config(path, default=""):
+    try:
+        return Path(path).read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return default
+    except (OSError, UnicodeError) as e:
+        console.print(Panel(f"Could not read configuration file '{path}': {e}", style="bold red"))
+        return default
+
+def write_config(path, value):
+    try:
+        config_path = Path(path)
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(str(value), encoding="utf-8")
+        return True
+    except OSError as e:
+        console.print(Panel(f"Could not save configuration file '{path}': {e}", style="bold red"))
+        return False
+
 def ollama_active_check(url="http://127.0.0.1:11434"):
     try:
         response = requests.get(url, timeout=5)
         return response.status_code == 200
 
-    except requests.exceptions.ConnectionError:
+    except requests.exceptions.RequestException:
         return False
 
 if ollama_active_check():
     pass
 else:
-    console.print(Panel("Ollama is not running. Please start Ollama to use Agent Glace."))
-    sys.exit()
+    console.print(Panel("Could not connect to Ollama at http://127.0.0.1:11434. Start Ollama and try again.", style="bold red"))
+    sys.exit(1)
 
 client = ollama.Client(host='http://127.0.0.1:11434')
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -59,34 +78,20 @@ vmodel_fl = os.path.join(home, "AGENT-GLACE", "config", "vmodel_choice")
 mem_fl = os.path.join(home, "AGENT-GLACE", "MEMORY.md")
 
 transcripts_dir = os.path.join(home, "AGENT-GLACE", "transcripts")
-os.makedirs(transcripts_dir, exist_ok=True)
 session_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 session_transcript_fl = os.path.join(transcripts_dir, f"Transcript_{session_time}.md")
 sys_msg_fl = os.path.join(script_dir, "SYSTEM.md")
 think_fl = os.path.join(home, "AGENT-GLACE", "config", "thinking_status")
 
 SANDBOX_ROOT = Path(os.path.join(home, "AGENT-GLACE", "sandbox")).resolve()
-os.makedirs(SANDBOX_ROOT, exist_ok=True)
-
-thinking_status = None
-
 try:
-    with open (think_fl, "r") as f:
-        tmp_status = f.read()
+    Path(transcripts_dir).mkdir(parents=True, exist_ok=True)
+    SANDBOX_ROOT.mkdir(parents=True, exist_ok=True)
+except OSError as e:
+    console.print(Panel(f"Could not create Agent Glace data directories: {e}", style="bold red"))
+    sys.exit(1)
 
-        if tmp_status == "True":
-            thinking_status = True
-
-        else:
-            thinking_status = False
-
-except FileNotFoundError:
-    os.makedirs(os.path.dirname(think_fl), exist_ok=True)
-
-    with open (think_fl, "w") as f:
-        f.write("False")
-
-    thinking_status = False
+thinking_status = read_config(think_fl, "False").lower() == "true"
 
 ## MEMORY
 
@@ -126,7 +131,9 @@ def load_memory_text() -> str:
             return f.read().strip()
 
     except FileNotFoundError:
-        os.makedirs(os.path.dirname(mem_fl), exist_ok=True)
+        return ""
+    except (OSError, UnicodeError) as e:
+        console.print(Panel(f"Could not read long-term memory: {e}", style="bold red"))
         return ""
 
 def build_system_message() -> str:
@@ -135,6 +142,10 @@ def build_system_message() -> str:
             system_msg = f.read()
 
     except FileNotFoundError:
+        console.print(Panel(f"System instructions file '{sys_msg_fl}' is missing.", style="bold red"))
+        system_msg = ""
+    except (OSError, UnicodeError) as e:
+        console.print(Panel(f"Could not read system instructions: {e}", style="bold red"))
         system_msg = ""
 
     memory_section = ""
@@ -340,17 +351,47 @@ def get_char_budget_window(messages, max_chars):
     return sys_message + selected_hist
 
 def ollama_list_models():
-    model_list_raw = client.list()
+    try:
+        model_list_raw = client.list()
+    except (ollama.RequestError, ollama.ResponseError) as e:
+        console.print(Panel(f"Could not retrieve Ollama models: {e}", style="bold red"))
+        return None
 
     print()
     console.print(Panel(Markdown("**Available Models:**")))
     print()
 
-    for model in model_list_raw.get('models', []):
-        print(model.get('model'))
+    model_names = [
+        model.get('model')
+        for model in model_list_raw.get('models', [])
+        if model.get('model')
+    ]
+    if not model_names:
+        console.print(Panel("No installed Ollama models were found. Install a model and try again."))
+    else:
+        for model_name in model_names:
+            print(model_name)
+    return model_names
+
+def start_chat_stream(**kwargs):
+    try:
+        return client.chat(**kwargs)
+    except (ollama.RequestError, ollama.ResponseError) as e:
+        report_ollama_chat_error(e)
+        return None
+
+def report_ollama_chat_error(error):
+    message = str(error)
+    if "model" in message.lower() and "not found" in message.lower():
+        message += "\nThe selected model may have been removed. Use /model to choose another installed model."
+    console.print(Panel(f"Ollama request failed: {message}", style="bold red"))
 
 def ollama_list_running():
-    ps_list_raw = client.ps()
+    try:
+        ps_list_raw = client.ps()
+    except (ollama.RequestError, ollama.ResponseError) as e:
+        console.print(Panel(f"Could not retrieve running Ollama models: {e}", style="bold red"))
+        return
 
     print()
     console.print(Panel(Markdown("**Running Models:**")))
@@ -491,11 +532,7 @@ def web_search(query: str, max_results: int=3) -> str:
         max_results (int): Number of results to return (Minimum is 3).
     """
 
-    try:
-        with open(search_engine_fl, "r") as f:
-            search_engine = f.read().strip()
-    except FileNotFoundError:
-        search_engine = "DDG"
+    search_engine = read_config(search_engine_fl, "DDG") or "DDG"
 
     if search_engine == "SXNG":
         params = {
@@ -506,15 +543,16 @@ def web_search(query: str, max_results: int=3) -> str:
         }
 
         try:
-            with open(sxng_url_fl, "r") as f:
-                sxng_url = f.read().strip()
-                if not sxng_url.endswith("search"):
-                    sxng_url = f"{sxng_url.rstrip('/')}/search"
+            sxng_url = read_config(sxng_url_fl)
+            if not sxng_url:
+                return "SearXNG is selected but its URL is missing. Set it with /search_engine."
+            if not sxng_url.endswith("search"):
+                sxng_url = f"{sxng_url.rstrip('/')}/search"
 
             headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
             }
-            response = requests.get(sxng_url, params=params, headers=headers)
+            response = requests.get(sxng_url, params=params, headers=headers, timeout=10)
             response.raise_for_status()
             data = response.json()
             
@@ -635,16 +673,16 @@ def get_image_context(file_path: str) -> str:
     """
     try:
         try:
-            with open(vmodel_fl, "r", encoding="utf-8") as f:
-                vmodel_name = f.read().strip()
+            vmodel_name = read_config(vmodel_fl)
+            if not vmodel_name:
+                return "No visual model selected. Choose one with /vision_model."
 
             encode_img = base64.b64encode(Path(file_path).read_bytes()).decode()
             desc = client.chat(model=vmodel_name, messages = [{'role': 'user', 'content': 'Describe this image for an LLM', 'images': [encode_img] } ])
             return desc['message']['content']
-        
-        except FileNotFoundError:
-            return "No visual model selected!"
-        
+
+        except (ollama.RequestError, ollama.ResponseError) as e:
+            return f"Could not analyze image with model '{vmodel_name}': {e}. Check that the model is installed and supports images."
     except Exception as e:
         return f"Error: {e}"
 
@@ -689,9 +727,9 @@ def open_app(appname: str) -> str:
         if sys.platform == "win32":
             os.startfile(appname)
         elif sys.platform == "darwin":
-            subprocess.call(["open", appname])
+            subprocess.run(["open", appname], check=True)
         else:
-            subprocess.call(["xdg-open", appname])
+            subprocess.run(["xdg-open", appname], check=True)
         return f"Application '{appname}' opened successfully."
     except Exception as e:
         return f"Error: {e}"
@@ -707,7 +745,8 @@ def open_webpage(url: str) -> str:
     """
     import webbrowser
     try:
-        webbrowser.open(url)
+        if not webbrowser.open(url):
+            return f"Could not open web page '{url}'."
         return f"Web page '{url}' opened successfully."
     except Exception as e:
         return f"Error: {e}"
@@ -741,6 +780,7 @@ Quick Commands:
 console.print(Rule(style="orange3"))
 
 def main_loop():
+    global thinking_status
     model_name = ""
 
     system_msg_final = build_system_message()
@@ -772,8 +812,13 @@ def main_loop():
         summary = summarize_session(messages, model_name, context_size)
 
         if summary:
-            compact_memory()
-            added = append_memory(summary, header=f"\n## Session {session_time}")
+            try:
+                compact_memory()
+                added = append_memory(summary, header=f"\n## Session {session_time}")
+            except OSError as e:
+                console.print(Panel(f"Could not save long-term memory: {e}", style="bold red"))
+                console.print(Rule(style="orange3"))
+                return
 
             if added:
                 console.print(Panel(f"Saved {added} new memory lines."))
@@ -785,61 +830,47 @@ def main_loop():
 
         console.print(Rule(style="orange3"))
 
-    try:
-        with open(model_config_fl, "r", encoding="utf-8") as f:
-            saved_model = f.read().strip()
-
-        model_name = saved_model
-        #console.print(Panel(Markdown(f"Model Selected: **{saved_model}**")))
-        #console.print(Rule(style="orange3"))
-
-    except FileNotFoundError:
-        ollama_list_models()
-        model_list = client.list().get("models", [])
-        available_models = [model.get("model") for model in model_list if model.get("model")]
-
+    model_name = read_config(model_config_fl)
+    available_models = ollama_list_models()
+    if available_models is None:
+        return
+    if model_name not in available_models:
+        if model_name:
+            console.print(Panel(f"Saved model '{model_name}' is no longer installed. Select an installed model."))
         if not available_models:
-            console.print(Panel(Markdown("**No installed Ollama models were found. Please install a model first.**")))
-            console.print(Rule(style="orange3"))
             return
 
         while model_name not in available_models:
             print()
             console.print(Rule(style="orange3"))
-            def_model_input = console.input("\nEnter model name: ").strip()
+            model_input = console.input("\nEnter model name: ").strip()
 
-            if def_model_input in available_models:
-                os.makedirs(os.path.dirname(model_config_fl), exist_ok=True)
-                with open(model_config_fl, "w", encoding="utf-8") as f:
-                    f.write(def_model_input)
-
-                model_name = def_model_input
-                console.print(Rule(style="orange3"))
-                console.print(Panel(Markdown(f"Model Selected: **{def_model_input}**")))
-                console.print(Rule(style="orange3"))
-                break
+            if model_input in available_models:
+                if write_config(model_config_fl, model_input):
+                    model_name = model_input
+                    console.print(Rule(style="orange3"))
+                    console.print(Panel(Markdown(f"Model Selected: **{model_input}**")))
+                    console.print(Rule(style="orange3"))
+                    break
+                return
 
             console.print(Panel(Markdown("**Model not found. Please enter one of the installed models shown above.**")))
             console.print(Rule(style="orange3"))
 
-    try:
-        with open(context_window_fl, "r", encoding="utf-8") as f:
-            context_size = f.read().strip()
-
-            if not context_size.isdigit() or int(context_size) <= 0:
-                console.print(Panel(Markdown("**Invalid context window size found in configuration. Please enter a positive integer for the context window size.**")))
-                console.print(Rule(style="orange3"))
-                raise FileNotFoundError
-
-    except FileNotFoundError:
+    saved_context_size = read_config(context_window_fl)
+    if saved_context_size.isdigit() and int(saved_context_size) > 0:
+        context_size = int(saved_context_size)
+    else:
+        if saved_context_size:
+            console.print(Panel(Markdown("**Invalid context window size in configuration. Please enter a positive integer.**")))
         print()
         console.print(Rule(style="orange3"))
 
         while True:
             try:
-                ctxt_size_input = int(console.input("\nEnter context window size (e.g., 6144): ").strip())
+                context_size = int(console.input("\nEnter context window size (e.g., 6144): ").strip())
 
-                if ctxt_size_input <= 0:
+                if context_size <= 0:
                     console.print(Panel(Markdown("**Invalid input. Please enter a positive integer for the context window size.**")))
                     console.print(Rule(style="orange3"))
                     continue
@@ -849,11 +880,7 @@ def main_loop():
                 console.print(Panel(Markdown("**Invalid input. Please enter a valid positive integer for the context window size.**")))
                 console.print(Rule(style="orange3"))
 
-        os.makedirs(os.path.dirname(context_window_fl), exist_ok=True)
-        with open(context_window_fl, "w", encoding="utf-8") as f:
-            f.write(str(ctxt_size_input))
-
-        context_size = ctxt_size_input
+        write_config(context_window_fl, context_size)
         console.print(Rule(style="orange3"))
 
     console.print(Panel(Markdown(f"Model Selected: **{model_name}** | Context Window Size: **{context_size}**")))
@@ -916,20 +943,16 @@ def main_loop():
                 continue
 
             elif user_input.lower() == "/model":
-                ollama_list_models()
+                available_models = ollama_list_models()
+                if not available_models:
+                    continue
                 print()
-                model_name = ""
-                model_list = client.list().get("models", [])
-                available_models = [model. get("model") for model in model_list if model.get("model")]
-
-                while model_name not in available_models:
+                while True:
                     model_change_input = console.input("Enter model name: ").strip()
 
                     if model_change_input in available_models:
-                        #os.makedirs(os.path.dirname(model_config_fl))
-                        with open (model_config_fl, "w", encoding="utf-8") as f:
-                            f.write(model_change_input)
-
+                        if not write_config(model_config_fl, model_change_input):
+                            break
                         model_name = model_change_input
                         print()
                         console.print(Rule(style="orange3"))
@@ -943,20 +966,11 @@ def main_loop():
                 continue
 
             elif user_input.lower() == "/thinking":
-                global thinking_status
-                if thinking_status == True:
-                    thinking_status = False
-                    with open(think_fl, "w") as f:
-                        f.write("False")
-
-                    console.print(Panel("Thinking has been turned off."))
-
-                elif thinking_status == False:
-                    thinking_status = True
-                    with open(think_fl, "w") as f:
-                        f.write("True")
-
-                    console.print(Panel("Thinking has been turned on."))
+                new_thinking_status = not thinking_status
+                if write_config(think_fl, new_thinking_status):
+                    thinking_status = new_thinking_status
+                    state = "on" if thinking_status else "off"
+                    console.print(Panel(f"Thinking has been turned {state}."))
 
                 continue
 
@@ -986,12 +1000,9 @@ def main_loop():
                         console.print(Panel(Markdown("**Invalid input. Please enter a valid positive integer for the context window size.**")))
                         console.print(Rule(style="orange3"))
 
-                context_size = new_context_size
-                os.makedirs(os.path.dirname(context_window_fl), exist_ok=True)
-                with open(context_window_fl, "w", encoding="utf-8") as f:
-                    f.write(str(new_context_size))
-
-                console.print(Panel(Markdown(f"Context window size updated to: **{new_context_size}**")))
+                if write_config(context_window_fl, new_context_size):
+                    context_size = new_context_size
+                    console.print(Panel(Markdown(f"Context window size updated to: **{new_context_size}**")))
                 continue
 
             elif user_input.lower() == "/transcripts":
@@ -1007,8 +1018,8 @@ def main_loop():
 
                     console.print(Panel(Markdown("**Transcripts directory opened.**")))
 
-                except FileNotFoundError:
-                    console.print(Panel(Markdown("**Transcripts directory not found. | No transcripts available.**")))
+                except (OSError, subprocess.SubprocessError) as e:
+                    console.print(Panel(f"Could not open transcripts directory: {e}", style="bold red"))
 
                 continue
 
@@ -1024,8 +1035,8 @@ def main_loop():
                         subprocess.run(["xdg-open", SANDBOX_ROOT])
                     console.print(Panel(Markdown("**Sandbox directory opened.**")))
             
-                except FileNotFoundError:
-                    console.print(Panel(Markdown("**Unable to open Sandbox directory. Try restarting Agent Glace.**")))
+                except (OSError, subprocess.SubprocessError) as e:
+                    console.print(Panel(f"Could not open sandbox directory: {e}", style="bold red"))
                     
                 continue
 
@@ -1042,16 +1053,18 @@ def main_loop():
                     new_search_engine = int(console.input("\nEnter new search engine (e.g., 1): ").strip())
 
                     if new_search_engine == 1:
-                        with open(search_engine_fl, "w") as f:
-                            f.write("DDG")
+                        if not write_config(search_engine_fl, "DDG"):
+                            continue
                         se_title = "DuckDuckGo"
                     elif new_search_engine == 2:
-                        with open(search_engine_fl, "w") as f:
-                            f.write("SXNG")
                         tmp_sxng_url = console.input("Enter SearXNG URL (e.g., http://localhost:8080/search ): ").strip()
-                        sxng_url = tmp_sxng_url
-                        with open(sxng_url_fl, "w") as f:
-                            f.write(tmp_sxng_url)
+                        if not tmp_sxng_url:
+                            console.print(Panel(Markdown("**SearXNG URL cannot be empty.**")))
+                            continue
+                        if not write_config(sxng_url_fl, tmp_sxng_url):
+                            continue
+                        if not write_config(search_engine_fl, "SXNG"):
+                            continue
                         se_title = "SearXNG"
                     else:
                         console.print(Panel(Markdown("**Invalid input. Please enter 1 or 2 for the search engine.**")))
@@ -1066,26 +1079,22 @@ def main_loop():
                     continue
 
             elif user_input.lower() == "/vision_model":
-                ollama_list_models()
+                available_models = ollama_list_models()
+                if available_models is None:
+                    continue
                 print()
-                vision_model_name = ""
-                model_list = client.list().get("models", [])
-                available_models = [model. get("model") for model in model_list if model.get("model")]
 
-                while vision_model_name not in available_models:
+                while True:
                     vision_model_change_input = console.input("Enter vision model name (/disable to disable vision): ").strip()
 
                     if vision_model_change_input.lower() == "/disable":
-                        with open (vmodel_fl, "w", encoding="utf-8") as f:
-                            f.write("")
-                        console.print(Panel(Markdown("**Vision disabled**")))
+                        if write_config(vmodel_fl, ""):
+                            console.print(Panel(Markdown("**Vision disabled**")))
                         break
 
                     elif vision_model_change_input in available_models:
-                        with open (vmodel_fl, "w", encoding="utf-8") as f:
-                            f.write(vision_model_change_input)
-
-                        vision_model_name = vision_model_change_input
+                        if not write_config(vmodel_fl, vision_model_change_input):
+                            break
                         print()
                         console.print(Rule(style="orange3"))
                         console.print(Panel(Markdown(f"Vision Model Selected: **{vision_model_change_input}** ")))
@@ -1108,7 +1117,7 @@ def main_loop():
 
             context_payload = get_char_budget_window(messages, max_chars=int(context_size))
 
-            stream =client.chat(
+            stream = start_chat_stream(
                 model=model_name,
                 messages=context_payload,
                 stream=True,
@@ -1116,8 +1125,11 @@ def main_loop():
                 think=thinking_status,
                 options={'num_ctx': int(context_size)}
             )
+            if stream is None:
+                continue
 
             def render_stream(response_stream):
+                global thinking_status
                 thinking_txt = ""
                 response_txt = ""
                 shown_response = 0
@@ -1215,13 +1227,21 @@ def main_loop():
                     print()
                     console.print(Panel("RESPONSE INTERRUPTED", style="bold red"))
 
-                except ollama.ResponseError:
-                    with open(think_fl, "w") as f:
-                        f.write("False")
+                except ollama.ResponseError as e:
+                    error_text = str(e).lower()
+                    if thinking_status and "think" in error_text and (
+                        "not support" in error_text or "unsupported" in error_text
+                    ):
+                        write_config(think_fl, False)
+                        thinking_status = False
+                        console.print(Panel("This model does not support thinking. Turned thinking off; please retry your message.", style="bold red"))
+                    else:
+                        report_ollama_chat_error(e)
+                    return None, []
 
-                    global thinking_status
-                    thinking_status = False
-                    console.print(Panel("Model does not support thinking. Thinking has been turned off." , style="bold red"))
+                except ollama.RequestError as e:
+                    report_ollama_chat_error(e)
+                    return None, []
 
                 console.print()
 
@@ -1241,6 +1261,8 @@ def main_loop():
 
             while True:
                 response_txt, tool_calls = render_stream(stream)
+                if response_txt is None:
+                    break
                 
                 assistant_msg = {
                     'role': 'assistant',
@@ -1256,8 +1278,21 @@ def main_loop():
                     break
 
                 for tool in tool_calls:
-                    fn_name = tool['function']['name']
-                    fn_args = tool['function']['arguments']
+                    try:
+                        function = tool["function"]
+                        fn_name = function["name"]
+                        fn_args = function["arguments"]
+                        if not isinstance(fn_name, str) or not isinstance(fn_args, dict):
+                            raise ValueError("tool name and arguments have invalid types")
+                    except (KeyError, TypeError, ValueError) as e:
+                        console.print(f"[orange3] ⚠️ Ignoring malformed tool call: {e}[/orange3]\n")
+                        messages.append(
+                            {
+                                'role': 'tool',
+                                'content': f"Error: malformed tool call: {e}"
+                            }
+                        )
+                        continue
                     
                     console.print(f"[dim] ⚙️ TOOL EXECUTION: {fn_name} for {fn_args} ⚙️[/dim]\n")
                     
@@ -1295,7 +1330,7 @@ def main_loop():
                 
                 context_payload = get_char_budget_window(messages, max_chars=int(context_size))
 
-                stream = client.chat(
+                stream = start_chat_stream(
                     model=model_name,
                     messages=context_payload,
                     tools=list(TOOL_REGISTRY.values()),
@@ -1303,12 +1338,21 @@ def main_loop():
                     think=thinking_status,
                     options={'num_ctx': int(context_size)}
                 )
+                if stream is None:
+                    response_txt = None
+                    break
 
-            with open(session_transcript_fl, "a", encoding="utf-8", errors="replace") as f:
-                f.write("\n\nUSER: \n")
-                f.write(user_input + "\n")
-                f.write("GLACE: \n")
-                f.write(final_response_for_transcript + "\n")
+            if response_txt is None:
+                continue
+
+            try:
+                with open(session_transcript_fl, "a", encoding="utf-8", errors="replace") as f:
+                    f.write("\n\nUSER: \n")
+                    f.write(user_input + "\n")
+                    f.write("GLACE: \n")
+                    f.write(final_response_for_transcript + "\n")
+            except OSError as e:
+                console.print(Panel(f"Could not save this exchange to the transcript: {e}", style="bold red"))
 
         except KeyboardInterrupt:
             consolidate_memory()
