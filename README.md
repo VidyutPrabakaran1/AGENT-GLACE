@@ -1,3 +1,5 @@
+<img width="1280" height="720" alt="ag" src="https://github.com/user-attachments/assets/39defcc3-4385-4c96-b147-693a88df754c" />
+
 # Agent Glace
 
 Agent Glace is a lightweight, local agentic harness for running smaller LLMs (e.g. <4B parameters) on modest systems through Ollama, aimed at making small local models more useful for lightweight everyday assistance.
