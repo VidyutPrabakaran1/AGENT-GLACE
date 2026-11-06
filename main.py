@@ -1007,8 +1007,7 @@ def main_loop():
 
     def consolidate_memory():
         """
-        Runs once when a session (or its history) ends: extracts durable
-        facts from `messages` and appends them to MEMORY.md.
+        Extracts durable facts from `messages` and appends them to MEMORY.md.
         """
         nonlocal had_conversation
 
@@ -1040,6 +1039,27 @@ def main_loop():
             console.print(Panel("Nothing durable enough to remember from this session."))
 
         console.print(Rule(style="orange3"))
+
+    def offer_memory_save():
+        nonlocal had_conversation
+
+        if not had_conversation:
+            return
+
+        try:
+            choice = console.input(
+                "Save durable facts from this conversation to long-term memory? (Yes/No): "
+            ).strip().lower()
+        except KeyboardInterrupt:
+            had_conversation = False
+            console.print("\nLong-term memory save skipped.")
+            return
+
+        if choice in {"y", "yes"}:
+            consolidate_memory()
+        else:
+            had_conversation = False
+            console.print("Long-term memory save skipped.")
 
     model_name = read_config(model_config_fl)
     available_models = ollama_list_models(show=False)
@@ -1109,7 +1129,7 @@ def main_loop():
             console.print()
 
             if user_input.lower() == "/exit" or user_input.lower() == "/bye":
-                consolidate_memory()
+                offer_memory_save()
                 console.print(Rule(style="orange3"))
                 console.print(Panel(Markdown(" **Exiting Agent Glace...** ")), style="bold red")
                 console.print(Rule(style="orange3"))
@@ -1130,7 +1150,7 @@ def main_loop():
 - `/list` - To list available/running models.
 - `/model` - To change model.
 - `/thinking` - To toggle thinking on/off.
-- `/clear` - To clear conversation history from the current session memory.
+- `/clear` - To clear the current model context. Transcript files are kept; saving durable facts to long-term memory is optional.
 - `/context_size` - To change context window size.
 - `/transcripts` - To open the transcripts directory.
 - `/sandbox` - To open the sandbox directory.
@@ -1189,14 +1209,14 @@ def main_loop():
                 continue
 
             elif user_input.lower() == "/clear":
-                consolidate_memory()
+                offer_memory_save()
                 messages = [
                     {
                         'role': 'system',
                         'content': build_system_message()
                     }
                 ]
-                console.print(Panel("Conversation cleared. Durable facts were saved to long-term memory."))
+                console.print(Panel("Current model context cleared. Transcript files are unchanged."))
                 continue
 
             elif user_input.lower() == "/context_size":
@@ -1545,7 +1565,7 @@ def main_loop():
                 console.print(Panel(f"Could not save this exchange to the transcript: {e}", style="bold red"))
 
         except KeyboardInterrupt:
-            consolidate_memory()
+            offer_memory_save()
             console.print(Rule(style="orange3"))
             console.print(Panel(Markdown(" **Exiting Agent Glace...** ")), style="bold red")
             console.print(Rule(style="orange3"))
