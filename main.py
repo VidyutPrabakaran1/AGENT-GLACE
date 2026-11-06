@@ -980,7 +980,7 @@ TOOL_REGISTRY = {
 ## CODE
 
 console.print(Rule(style="orange3"))
-console.print(Panel(Markdown(" WELCOME TO **AGENT GLACE!** "), title="AGENT GLACE", style="orange3"))
+console.print(Panel(Markdown(" WELCOME TO **AGENT GLACE!** [v0.1]"), title="AGENT GLACE", style="orange3"))
 
 console.print(Panel(Markdown('''
 Quick Commands:
