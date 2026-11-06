@@ -1,5 +1,5 @@
-ollama
-rich
-requests
-ddgs
-trafilatura
+ollama==0.6.3
+rich==15.0.0
+requests==2.34.2
+ddgs==9.16.1
+trafilatura==2.3.1
