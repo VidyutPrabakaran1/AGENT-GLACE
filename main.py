@@ -350,16 +350,12 @@ def get_char_budget_window(messages, max_chars):
 
     return sys_message + selected_hist
 
-def ollama_list_models():
+def ollama_list_models(show=True):
     try:
         model_list_raw = client.list()
     except (ollama.RequestError, ollama.ResponseError) as e:
         console.print(Panel(f"Could not retrieve Ollama models: {e}", style="bold red"))
         return None
-
-    print()
-    console.print(Panel(Markdown("**Available Models:**")))
-    print()
 
     model_names = [
         model.get('model')
@@ -368,7 +364,10 @@ def ollama_list_models():
     ]
     if not model_names:
         console.print(Panel("No installed Ollama models were found. Install a model and try again."))
-    else:
+    elif show:
+        print()
+        console.print(Panel(Markdown("**Available Models:**")))
+        print()
         for model_name in model_names:
             print(model_name)
     return model_names
@@ -671,20 +670,82 @@ def get_image_context(file_path: str) -> str:
     Use this whenever you need to see what's in an image file path given by the user.
     The image file path doesn't need to be inside the sandbox folder.
     """
+    vmodel_name = read_config(vmodel_fl)
+    if not vmodel_name:
+        return "Vision is disabled. Choose a model with /vision_model to analyze images."
+
     try:
-        try:
-            vmodel_name = read_config(vmodel_fl)
-            if not vmodel_name:
-                return "No visual model selected. Choose one with /vision_model."
-
-            encode_img = base64.b64encode(Path(file_path).read_bytes()).decode()
-            desc = client.chat(model=vmodel_name, messages = [{'role': 'user', 'content': 'Describe this image for an LLM', 'images': [encode_img] } ])
-            return desc['message']['content']
-
-        except (ollama.RequestError, ollama.ResponseError) as e:
-            return f"Could not analyze image with model '{vmodel_name}': {e}. Check that the model is installed and supports images."
+        image_data = base64.b64encode(Path(file_path).read_bytes()).decode()
+        response = client.chat(
+            model=vmodel_name,
+            messages=[{
+                'role': 'user',
+                'content': 'Describe this image for an LLM',
+                'images': [image_data]
+            }]
+        )
+        return response['message']['content']
+    except FileNotFoundError:
+        return f"Image file '{file_path}' was not found."
+    except PermissionError:
+        return f"Permission denied while reading image '{file_path}'."
+    except (ollama.RequestError, ollama.ResponseError) as e:
+        return (
+            f"Could not analyze the image with vision model '{vmodel_name}': {e}. "
+            "The model may have been removed or may not support images. "
+            "Use /vision_model to choose another model or disable vision."
+        )
+    except (OSError, UnicodeError) as e:
+        return f"Could not read image '{file_path}': {e}"
     except Exception as e:
         return f"Error: {e}"
+
+def configure_vision_model():
+    current_model = read_config(vmodel_fl)
+    available_models = ollama_list_models()
+
+    if current_model:
+        if available_models is not None and current_model not in available_models:
+            console.print(Panel(f"Saved vision model '{current_model}' is no longer installed."))
+        else:
+            console.print(Panel(f"Current vision model: **{current_model}**"))
+    else:
+        console.print(Panel("Vision is currently disabled."))
+
+    if available_models is None:
+        console.print(Panel("Ollama is unavailable. You can still disable vision or cancel; start Ollama to select a model."))
+    elif not available_models:
+        console.print(Panel("No installed models are available. Install a model before enabling vision."))
+
+    while True:
+        selection = console.input(
+            "Enter an installed model name to enable/change vision, "
+            "/disable to turn it off, or /cancel to keep the current setting: "
+        ).strip()
+        normalized_selection = selection.lower()
+
+        if normalized_selection == "/cancel" or not selection:
+            console.print(Panel("Vision setting unchanged."))
+            return
+
+        if normalized_selection == "/disable":
+            if write_config(vmodel_fl, ""):
+                console.print(Panel("Vision disabled."))
+            return
+
+        if available_models is None:
+            console.print(Panel("Could not verify that model because Ollama is unavailable. Start Ollama and try again."))
+            return
+
+        if selection in available_models:
+            if write_config(vmodel_fl, selection):
+                console.print(Panel(f"Vision enabled with model **{selection}**."))
+            return
+
+        if not available_models:
+            console.print(Panel("No installed models are available. Enter /disable or /cancel."))
+        else:
+            console.print(Panel("Model not found. Choose a model from the list, /disable, or /cancel."))
 
 def math_tool(expression: str) -> str:
     """
@@ -831,7 +892,7 @@ def main_loop():
         console.print(Rule(style="orange3"))
 
     model_name = read_config(model_config_fl)
-    available_models = ollama_list_models()
+    available_models = ollama_list_models(show=False)
     if available_models is None:
         return
     if model_name not in available_models:
@@ -839,6 +900,9 @@ def main_loop():
             console.print(Panel(f"Saved model '{model_name}' is no longer installed. Select an installed model."))
         if not available_models:
             return
+        console.print(Panel(Markdown("**Available Models:**")))
+        for available_model in available_models:
+            print(available_model)
 
         while model_name not in available_models:
             print()
@@ -921,7 +985,7 @@ def main_loop():
 - `/transcripts` - To open the transcripts directory.
 - `/sandbox` - To open the sandbox directory.
 - `/search_engine` - To change search engine.
-- `/vision_model` - To set the vision model for image analysis.
+- `/vision_model` - To enable, change, or disable image analysis.
 ''')
                     )
                 )
@@ -1079,31 +1143,7 @@ def main_loop():
                     continue
 
             elif user_input.lower() == "/vision_model":
-                available_models = ollama_list_models()
-                if available_models is None:
-                    continue
-                print()
-
-                while True:
-                    vision_model_change_input = console.input("Enter vision model name (/disable to disable vision): ").strip()
-
-                    if vision_model_change_input.lower() == "/disable":
-                        if write_config(vmodel_fl, ""):
-                            console.print(Panel(Markdown("**Vision disabled**")))
-                        break
-
-                    elif vision_model_change_input in available_models:
-                        if not write_config(vmodel_fl, vision_model_change_input):
-                            break
-                        print()
-                        console.print(Rule(style="orange3"))
-                        console.print(Panel(Markdown(f"Vision Model Selected: **{vision_model_change_input}** ")))
-                        console.print(Rule(style="orange3"))
-                        break
-
-                    console.print(Panel(Markdown("**Model not found. Please enter one of the installed models shown above.**")))
-                    console.print(Rule(style="orange3"))
-
+                configure_vision_model()
                 continue
 
             messages.append(
