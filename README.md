@@ -51,6 +51,8 @@ python main.py
 
 On first launch, Agent Glace asks you to select an installed model and enter a positive context-window size. The selected model must be available in Ollama.
 
+The context size you enter is used by Agent Glace in two ways: it is sent to Ollama as the requested `num_ctx` for chat requests, and it helps Agent Glace limit how much conversation history it includes. That local history limit is measured approximately in characters, not tokens. You normally do not need to enter the same value separately in Ollama; however, if your Ollama setup imposes a lower context limit, raise that limit to allow the requested size. Larger context windows can use more memory.
+
 ## Commands
 
 Enter these commands at the Agent Glace prompt:
