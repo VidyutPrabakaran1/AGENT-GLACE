@@ -101,7 +101,7 @@ Chat and image-analysis requests are sent to the configured Ollama endpoint, whi
 
 ## Tested models & performance
 
-These are the models that have been tested to work reliably with Agent Glace, below are the average speeds of the models on this system configuration:
+These are the models that have been tested to work reliably with Agent Glace, below are the average speeds of the models running on CPU inference with the following system configuration:
 
 - **CPU:** Intel Core i7-1185G7
 - **Memory:** 24 GB DDR4-3200
