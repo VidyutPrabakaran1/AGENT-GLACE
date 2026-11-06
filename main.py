@@ -17,7 +17,9 @@ import re
 import queue
 import threading
 import time
-from pathlib import Path
+import tempfile
+import stat
+from pathlib import Path, PureWindowsPath
 import base64
 import math
 
@@ -638,6 +640,152 @@ def read_sandboxed_file(file_name: str) -> str:
     except Exception as e:
         return f"Error reading file: {str(e)}"
 
+def create_sandboxed_file(file_path: str, content: str) -> str:
+    """
+    Create a new UTF-8 text file inside the sandbox. Never overwrites existing files.
+    Args:
+        file_path: Relative path and filename inside SANDBOX; may start with SANDBOX/.
+        content: Text to write, limited to 1 MB when encoded as UTF-8.
+    """
+    if not isinstance(file_path, str) or not file_path.strip():
+        return "Error: provide a relative file path inside SANDBOX."
+    if not isinstance(content, str):
+        return "Error: file content must be text."
+
+    normalized_path = file_path.strip().replace("\\", "/")
+    if "\x00" in normalized_path or ":" in normalized_path:
+        return "Error: invalid characters in file path."
+
+    if normalized_path.split("/", 1)[0].lower() == "sandbox":
+        normalized_path = normalized_path.split("/", 1)[1] if "/" in normalized_path else ""
+
+    relative_path = Path(normalized_path)
+    if (
+        not normalized_path
+        or relative_path.is_absolute()
+        or relative_path.drive
+        or PureWindowsPath(normalized_path).is_absolute()
+        or PureWindowsPath(normalized_path).drive
+        or any(part in ("", "..") for part in normalized_path.split("/"))
+        or relative_path == Path(".")
+    ):
+        return "Error: file path must be relative to SANDBOX and cannot contain '..'."
+
+    try:
+        content_bytes = content.encode("utf-8")
+        if len(content_bytes) > 1_000_000:
+            return "Error: file content exceeds the 1 MB limit."
+
+        target_path = SANDBOX_ROOT / relative_path
+        parent_path = target_path.parent.resolve()
+        parent_path.relative_to(SANDBOX_ROOT)
+        parent_path.mkdir(parents=True, exist_ok=True)
+
+        parent_path = target_path.parent.resolve()
+        parent_path.relative_to(SANDBOX_ROOT)
+        resolved_target = (parent_path / target_path.name).resolve()
+        resolved_target.relative_to(SANDBOX_ROOT)
+
+        with resolved_target.open("x", encoding="utf-8", newline="") as file:
+            file.write(content)
+        return f"Created SANDBOX/{relative_path.as_posix()}."
+    except FileExistsError:
+        return f"Error: SANDBOX/{relative_path.as_posix()} already exists; no file was overwritten."
+    except ValueError:
+        return "Error: access denied. File path resolves outside SANDBOX."
+    except (OSError, UnicodeError) as e:
+        return f"Error creating SANDBOX/{relative_path.as_posix()}: {e}"
+
+def edit_sandboxed_file(file_path: str, old_text: str, new_text: str) -> str:
+    """
+    Replace one exact, unique text match in an existing UTF-8 sandbox file.
+    Never creates a file or replaces more than one occurrence.
+    """
+    if not isinstance(file_path, str) or not file_path.strip():
+        return "Error: provide a relative file path inside SANDBOX."
+    if not isinstance(old_text, str) or not old_text:
+        return "Error: old_text must be a non-empty exact text snippet."
+    if not isinstance(new_text, str):
+        return "Error: new_text must be text."
+
+    normalized_path = file_path.strip().replace("\\", "/")
+    if "\x00" in normalized_path or ":" in normalized_path:
+        return "Error: invalid characters in file path."
+    if normalized_path.split("/", 1)[0].lower() == "sandbox":
+        normalized_path = normalized_path.split("/", 1)[1] if "/" in normalized_path else ""
+
+    relative_path = Path(normalized_path)
+    if (
+        not normalized_path
+        or relative_path.is_absolute()
+        or relative_path.drive
+        or PureWindowsPath(normalized_path).is_absolute()
+        or PureWindowsPath(normalized_path).drive
+        or any(part in ("", "..") for part in normalized_path.split("/"))
+        or relative_path == Path(".")
+    ):
+        return "Error: file path must be relative to SANDBOX and cannot contain '..'."
+
+    temp_path = None
+    try:
+        target_path = (SANDBOX_ROOT / relative_path).resolve()
+        target_path.relative_to(SANDBOX_ROOT)
+        if not target_path.is_file():
+            return f"Error: sandbox file '{relative_path.as_posix()}' does not exist."
+
+        original_bytes = target_path.read_bytes()
+        if len(original_bytes) > 1_000_000:
+            return "Error: file exceeds the 1 MB edit limit."
+        original_text = original_bytes.decode("utf-8")
+        match_count = original_text.count(old_text)
+        if match_count == 0:
+            return "Error: old_text was not found; no changes were made."
+        if match_count > 1:
+            return f"Error: old_text occurs {match_count} times; provide a more specific snippet. No changes were made."
+
+        updated_text = original_text.replace(old_text, new_text, 1)
+        updated_bytes = updated_text.encode("utf-8")
+        if len(updated_bytes) > 1_000_000:
+            return "Error: edited file would exceed the 1 MB limit."
+        if updated_text == original_text:
+            return f"No changes needed in SANDBOX/{relative_path.as_posix()}."
+
+        original_mode = target_path.stat().st_mode
+        file_descriptor, temp_name = tempfile.mkstemp(
+            prefix=f".{target_path.name}.",
+            suffix=".tmp",
+            dir=target_path.parent
+        )
+        temp_path = Path(temp_name)
+        with os.fdopen(file_descriptor, "w", encoding="utf-8", newline="") as temp_file:
+            temp_file.write(updated_text)
+            temp_file.flush()
+            os.fsync(temp_file.fileno())
+
+        if os.name != "nt":
+            os.chmod(temp_path, stat.S_IMODE(original_mode))
+
+        if target_path.read_bytes() != original_bytes:
+            return "Error: file changed during editing; no changes were applied. Try again."
+
+        os.replace(temp_path, target_path)
+        temp_path = None
+        return f"Updated SANDBOX/{relative_path.as_posix()}."
+    except ValueError:
+        return "Error: access denied. Resolved path is outside SANDBOX."
+    except UnicodeDecodeError as e:
+        return f"Error: sandbox file is not valid UTF-8 text: {e}"
+    except OSError as e:
+        return f"Error editing SANDBOX/{relative_path.as_posix()}: {e}"
+    finally:
+        if temp_path is not None:
+            try:
+                temp_path.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError as cleanup_error:
+                console.print(Panel(f"Could not remove temporary edit file '{temp_path}': {cleanup_error}", style="bold red"))
+
 def handle_sub_dir_error(error):
     console.print((Markdown(f"Skipping subdirectory due to error: {error.filename} ({error.strerror})", style="dim")))
 
@@ -819,6 +967,8 @@ TOOL_REGISTRY = {
     "read_recent_history": read_recent_history,
     "web_search": web_search,
     "read_sandboxed_file": read_sandboxed_file,
+    "create_sandboxed_file": create_sandboxed_file,
+    "edit_sandboxed_file": edit_sandboxed_file,
     "list_sandboxed_files": list_sandboxed_files,
     "get_image_context": get_image_context,
     "math_tool": math_tool,
