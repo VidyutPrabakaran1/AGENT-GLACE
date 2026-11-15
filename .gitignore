@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 Dockerfile
 README_DRAFT.md
+PRIVACY_POLICY_DRAFT.md
+TERMS_OF_SERVICE_DRAFT.md
