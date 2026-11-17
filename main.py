@@ -69,6 +69,8 @@ else:
     sys.exit(1)
 
 client = ollama.Client(host='http://127.0.0.1:11434')
+
+MODEL_KEEP_ALIVE = os.environ.get('OLLAMA_KEEP_ALIVE', -1)
 script_dir = os.path.dirname(os.path.abspath(__file__))
 home = Path.home()
 
@@ -304,7 +306,8 @@ TRANSCRIPT:
             model=model_name,
             messages=[{'role': 'user', 'content': extraction_prompt}],
             stream=False,
-            options={'num_ctx': int(context_size)}
+            options={'num_ctx': int(context_size)},
+            keep_alive=MODEL_KEEP_ALIVE
         )
 
         summary = response['message']['content'].strip()
@@ -376,6 +379,7 @@ def ollama_list_models(show=True):
 
 def start_chat_stream(**kwargs):
     try:
+        kwargs.setdefault('keep_alive', MODEL_KEEP_ALIVE)
         return client.chat(**kwargs)
     except (ollama.RequestError, ollama.ResponseError) as e:
         report_ollama_chat_error(e)
@@ -830,7 +834,8 @@ def get_image_context(file_path: str) -> str:
                 'role': 'user',
                 'content': 'Describe this image for an LLM',
                 'images': [image_data]
-            }]
+            }],
+            keep_alive=MODEL_KEEP_ALIVE
         )
         return response['message']['content']
     except FileNotFoundError:
